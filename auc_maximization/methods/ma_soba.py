@@ -14,25 +14,18 @@ class Learner(nn.Module):
     """
     Meta Learner
     """
-    def __init__(self, args, training_size):
+    def __init__(self, args):
         """
         :param args:
         """
         super(Learner, self).__init__()
         self.args = args
         self.num_labels = args.num_labels
-        self.xi = args.xi
-        self.data=args.data
-        self.outer_batch_size = args.outer_batch_size
-        self.inner_batch_size = args.inner_batch_size
         self.outer_update_lr = args.outer_update_lr
-        self.old_outer_update_lr = args.outer_update_lr
         self.inner_update_lr = args.inner_update_lr
         self.inner_update_step = args.inner_update_step
-        self.inner_update_step_eval = args.inner_update_step_eval
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.collate_pad_ = self.collate_pad if args.data=='news_data' else self.collate_pad_snli
-        self.training_size = training_size
 
         if args.data == 'news_data':
             self.meta_model = RNN(
@@ -75,13 +68,7 @@ class Learner(nn.Module):
         self.outer_stepLR = torch.optim.lr_scheduler.StepLR(self.outer_optimizer, step_size=args.epoch, gamma=0.2)
         self.aucloss = AUCMLoss(self.a, self.b, self.alpha)
         self.inner_model.train()
-        self.gamma = args.gamma
         self.beta = args.beta
-        self.nu = args.nu
-        self.y_warm_start = args.y_warm_start
-        self.normalized = args.grad_normalized
-        self.grad_clip = args.grad_clip
-        self.no_meta = args.no_meta
         self.criterion = nn.CrossEntropyLoss(reduction='none').to(self.device)
 
     def forward(self, train_loader, val_loader, training=True, epoch=0):

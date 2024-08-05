@@ -16,26 +16,18 @@ class Learner(nn.Module):
     """
     Meta Learner
     """
-    def __init__(self, args, training_size):
+    def __init__(self, args):
         """
         :param args:
         """
         super(Learner, self).__init__()
         self.args = args
-        self.num_labels = args.num_labels
-        self.xi = args.xi
-        self.data=args.data
-        self.outer_batch_size = args.outer_batch_size
-        self.inner_batch_size = args.inner_batch_size
         self.outer_update_lr = args.outer_update_lr
-        self.old_outer_update_lr = args.outer_update_lr
         self.inner_update_lr = args.inner_update_lr
         self.inner_update_step = args.inner_update_step
-        self.inner_update_step_eval = args.inner_update_step_eval
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.collate_pad_ = self.collate_pad if args.data=='news_data' else self.collate_pad_snli
-        self.training_size = training_size
-        self.interval = args.interval
+        self.update_interval = args.update_interval
         if args.data == 'news_data':
             self.meta_model = RNN(
                 word_embed_dim=args.word_embed_dim,
@@ -60,8 +52,6 @@ class Learner(nn.Module):
                 pool_type=args.pool_type,
                 linear_fc=args.linear_fc
             )
-        self.lambda_x =  torch.ones((self.training_size)).to(self.device)
-        self.lambda_x.requires_grad=True
         param_count = 0
         for param in self.inner_model.parameters():
             param_count += param.numel()
@@ -80,13 +70,9 @@ class Learner(nn.Module):
         self.outer_stepLR = torch.optim.lr_scheduler.StepLR(self.outer_optimizer, step_size=args.epoch, gamma=0.2)
         self.aucloss = AUCMLoss(self.a, self.b, self.alpha)
         self.inner_model.train()
-        self.gamma = args.gamma
         self.beta = args.beta
         self.nu = args.nu
         self.y_warm_start = args.y_warm_start
-        self.normalized = args.grad_normalized
-        self.grad_clip = args.grad_clip
-        self.no_meta = args.no_meta
         self.criterion = nn.CrossEntropyLoss(reduction='none').to(self.device)
 
     def forward(self, train_loader, val_loader, training=True, epoch=0):
@@ -95,7 +81,7 @@ class Learner(nn.Module):
         self.inner_model.to(self.device)
         # self.y_warm_start = math.ceil(self.y_warm_start/2) if (task_id%5==0 and task_id>0) else self.y_warm_start
         for step, data in enumerate(train_loader):
-            num_inner_update_step = self.y_warm_start if step%self.interval==0  else self.inner_update_step
+            num_inner_update_step = self.y_warm_start if step%self.update_interval==0  else self.inner_update_step
             all_loss = []
 
             input, label_id, data_indx = data
@@ -105,7 +91,7 @@ class Learner(nn.Module):
             all_loss.append(inner_loss.item())
             g_grad = self.alpha.grad
             jacob = torch.autograd.grad(g_grad, self.alpha, grad_outputs=self.z_params)
-            if step%self.interval == 0:
+            if step%self.update_interval == 0:
                 self.inner_optimizer.step()
                 for i in range(0, num_inner_update_step):
                     input, label_id, data_indx = next(iter(train_loader))

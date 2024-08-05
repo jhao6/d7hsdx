@@ -15,21 +15,15 @@ class Learner(nn.Module):
     """
     Meta Learner
     """
-    def __init__(self, args, training_size):
+    def __init__(self, args):
         """
         :param args:
         """
         super(Learner, self).__init__()
         self.args = args
-        self.num_labels = args.num_labels
-        self.outer_batch_size = args.outer_batch_size
-        self.inner_batch_size = args.inner_batch_size
         self.outer_update_lr  = args.outer_update_lr
-        self.old_outer_update_lr = args.outer_update_lr
         self.inner_update_lr  = args.inner_update_lr
         self.inner_update_step = args.inner_update_step
-        self.inner_update_step_eval = args.inner_update_step_eval
-        self.training_size = training_size
         self.device =torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         self.inner_model = RNN(
@@ -71,9 +65,7 @@ class Learner(nn.Module):
         self.aucloss = AUCMLoss(self.a, self.b, self.alpha)
         self.aucloss_old = AUCMLoss(self.a_old, self.b_old, self.alpha_old)
         self.inner_model.train()
-        self.gamma = args.gamma
-        self.grad_clip = args.grad_clip
-        self.no_meta = args.no_meta
+        self.beta = args.beta
         self.criterion = nn.CrossEntropyLoss(reduction='none').to(self.device)
 
     def forward(self, train_loader, val_loader, training=True, epoch=0):
@@ -118,7 +110,7 @@ class Learner(nn.Module):
                 grad_x_on_old_model = self.stocbio_old(outer_loss_old, train_batch, val_batch)
 
                 for  (gx, gxo, gxoo)  in zip( grad_x, self.grad_x_old, grad_x_on_old_model):
-                    new_grad = gx.data.detach() + (1 - self.gamma) * (gxo.data.detach() - gxoo.data.detach())
+                    new_grad = gx.data.detach() + (1 - self.beta) * (gxo.data.detach() - gxoo.data.detach())
                     gxo.data = new_grad
 
                 input, label, data_idx = next(iter(train_loader))
@@ -130,7 +122,7 @@ class Learner(nn.Module):
                 inner_loss = -self.aucloss_old(outputs, label.to(self.device))
                 grad_y_on_old_model = torch.autograd.grad(inner_loss, self.alpha_old)
 
-                self.grad_y_old[0].data = grad_y[0].data.detach() + (1-self.gamma) * (self.grad_y_old[0].detach() - grad_y_on_old_model[0].detach())
+                self.grad_y_old[0].data = grad_y[0].data.detach() + (1-self.beta) * (self.grad_y_old[0].detach() - grad_y_on_old_model[0].detach())
                 self.alpha_old.data = self.alpha.data.clone()
                 self.alpha.grad = self.grad_y_old[0].data.detach()
                 self.a_old.data = self.a.data.clone()
@@ -159,8 +151,7 @@ class Learner(nn.Module):
             param_group['lr'] =  self.args.outer_update_lr * ((1 / (epoch + 2)) ** (1 / 3))
             lr = param_group['lr']
             print(f'Outer LR: {lr}')
-            # self.gamma = self.gamma * (lr ** 2)
-            # print(f' gamma: {self.gamma}')
+
         for param_group in self.inner_optimizer.param_groups:
             param_group['lr'] =  self.args.inner_update_lr * ((1 / (epoch + 2)) ** (1 / 3))
             lr = param_group['lr']
@@ -224,7 +215,7 @@ class Learner(nn.Module):
         Gy_gradient = torch.autograd.grad(inner_loss, self.alpha, create_graph=True)
 
         for g_grad, param in zip(Gy_gradient, self.alpha):
-            G_gradient.append((param - self.args.hessian_lr * g_grad).view(-1))
+            G_gradient.append((param - self.args.neumann_lr * g_grad).view(-1))
         # G_gradient = torch.reshape(torch.hstack(G_gradient), [-1])
 
         for _ in range(self.args.hessian_q):
@@ -233,7 +224,7 @@ class Learner(nn.Module):
             v_0 = v_new[0].data.detach()
             z_list.append(v_0)
         index = np.random.randint(self.args.hessian_q)
-        v_Q = self.args.hessian_lr * z_list[index]
+        v_Q = self.args.neumann_lr * z_list[index]
         # Gyx_gradient
         outputs = predict(self.inner_model, val_data)
         inner_loss = -self.aucloss(outputs, val_labels.to(self.device))
@@ -263,7 +254,7 @@ class Learner(nn.Module):
         Gy_gradient = torch.autograd.grad(inner_loss, self.alpha_old, create_graph=True)
 
         for g_grad, param in zip(Gy_gradient, self.alpha_old):
-            G_gradient.append((param - self.args.hessian_lr * g_grad).view(-1))
+            G_gradient.append((param - self.args.neumann_lr * g_grad).view(-1))
         # G_gradient = torch.reshape(torch.hstack(G_gradient), [-1])
 
         for _ in range(self.args.hessian_q):
@@ -272,7 +263,7 @@ class Learner(nn.Module):
             v_0 = v_new[0].data.detach()
             z_list.append(v_0)
         index = np.random.randint(self.args.hessian_q)
-        v_Q = self.args.hessian_lr * z_list[index]
+        v_Q = self.args.neumann_lr * z_list[index]
 
         # Gyx_gradient
         outputs = predict(self.inner_model_old, val_data)

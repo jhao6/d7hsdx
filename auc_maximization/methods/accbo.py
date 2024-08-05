@@ -18,26 +18,19 @@ class Learner(nn.Module):
     """
     Meta Learner
     """
-    def __init__(self, args, training_size):
+    def __init__(self, args):
         """
         :param args:
         """
         super(Learner, self).__init__()
         self.args = args
         self.num_labels = args.num_labels
-        self.xi = args.xi
         self.data=args.data
-        self.outer_batch_size = args.outer_batch_size
-        self.inner_batch_size = args.inner_batch_size
         self.outer_update_lr = args.outer_update_lr
-        self.old_outer_update_lr = args.outer_update_lr
         self.inner_update_lr = args.inner_update_lr
         self.inner_update_step = args.inner_update_step
-        self.inner_update_step_eval = args.inner_update_step_eval
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.collate_pad_ = self.collate_pad if args.data=='news_data' else self.collate_pad_snli
-        self.training_size = training_size
-        self.interval = args.interval
         if args.data == 'news_data':
             self.meta_model = RNN(
                 word_embed_dim=args.word_embed_dim,
@@ -62,8 +55,6 @@ class Learner(nn.Module):
                 pool_type=args.pool_type,
                 linear_fc=args.linear_fc
             )
-        # self.lambda_x =  torch.ones((self.training_size)).to(self.device)
-        # self.lambda_x.requires_grad=True
         param_count = 0
         for param in self.inner_model.parameters():
             param_count += param.numel()
@@ -79,17 +70,12 @@ class Learner(nn.Module):
         self.y_hat = torch.zeros(1, dtype=torch.float32, device=self.device, requires_grad=True).to(self.device)
         self.outer_optimizer = SGD(self.upper_variables, lr=self.outer_update_lr)
         self.inner_optimizer = SGD([self.alpha], lr=self.inner_update_lr)
-        self.inner_stepLR = torch.optim.lr_scheduler.StepLR(self.inner_optimizer, step_size=args.epoch, gamma=0.2)
-        self.outer_stepLR = torch.optim.lr_scheduler.StepLR(self.outer_optimizer, step_size=args.epoch, gamma=0.2)
         self.aucloss = AUCMLoss(self.a, self.b, self.alpha)
         self.inner_model.train()
         self.gamma = args.gamma
         self.beta = args.beta
         self.nu = args.nu
         self.y_warm_start = args.y_warm_start
-        self.normalized = args.grad_normalized
-        self.grad_clip = args.grad_clip
-        self.no_meta = args.no_meta
         self.criterion = nn.CrossEntropyLoss(reduction='none').to(self.device)
 
     def forward(self, train_loader, val_loader, training=True, epoch=0):
@@ -193,14 +179,13 @@ class Learner(nn.Module):
             Gy_gradient = torch.autograd.grad(inner_loss, self.alpha, create_graph=True)
             G_gradient = []
             for g_grad, param in zip(Gy_gradient, self.alpha):
-                G_gradient.append((param - self.args.hessian_lr * g_grad).view(-1))
+                G_gradient.append((param - self.args.neumann_lr * g_grad).view(-1))
             for _ in range(self.args.hessian_q):
                 v_new = torch.autograd.grad(G_gradient, self.alpha, grad_outputs=v_0, retain_graph=True)
                 v_0 = v_new[0].data.detach()
                 z_list.append(v_0)
             index = np.random.randint(self.args.hessian_q)
-            v_Q = self.args.hessian_lr * z_list[index]
-            # v_Q = self.args.hessian_lr * v_0 + torch.sum(torch.stack(z_list), dim=0)
+            v_Q = self.args.neumann_lr * z_list[index]
 
 
             output = predict(self.inner_model, input_val)

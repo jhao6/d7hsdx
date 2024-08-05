@@ -12,11 +12,11 @@ logger.setLevel(logging.CRITICAL)
 # os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 # from reptile import Learner
-from methods import aid, saba, ma_soba, ttsa, bo_rep, accbo, sustain, vrbo
-
-from data_loader import Sent140Dataset,  collate_pad
+from methods import stocbio, saba, ma_soba, ttsa, bo_rep, accbo, sustain, vrbo
+from task import MetaTask
+from data_loader import SNLIDataset, Sent140Dataset,  collate_pad, collate_pad_double
 from torch.utils.data import DataLoader
-
+# from task_snli import MetaTask_snli
 import random
 import numpy as np
 torch.backends.cudnn.enabled = False
@@ -68,45 +68,36 @@ def main():
     parser.add_argument("--data", default='sentment140', type=str,
                         help="dataset: [news_data, snli, sentment140]", )
 
-    parser.add_argument("--data_path", default='data', type=str,
+    parser.add_argument("--data_path", default='../data/news-data/dataset.json', type=str,
                         help="Path to dataset file")
 
     parser.add_argument("--batch_size", default=32, type=int,
                         help="batch_size", )
 
-
-    parser.add_argument("--save_direct", default='./', type=str,
+    parser.add_argument("--save_direct", default='saba', type=str,
                         help="Path to save file")
 
-    parser.add_argument("--word2vec", default="data/wordvec.pkl", type=str,
+    parser.add_argument("--word2vec", default="data/news-data/wordvec.pkl", type=str,
                         help="Path to word2vec file")
 
-    parser.add_argument("--methods" , default='saba', type=str,
-                        help="choise method [aid, ttsa, saba, ma-soba, bo-rep, sustain, vrbo, accbo]")
+    parser.add_argument("--methods" , default='stocbio', type=str,
+                        help="choice method [stocbio, ttsa, saba, ma-soba, bo-rep, sustain, vrbo, accbo]")
 
     parser.add_argument("--num_labels", default=2, type=int,
                         help="Number of class for classification")
 
     parser.add_argument("--epoch", default=25, type=int,
                         help="Number of outer interation")
-    
-    parser.add_argument("--k_spt", default=20, type=int,
-                        help="Number of support samples per task")
-    
-    parser.add_argument("--k_qry", default=20, type=int,
-                        help="Number of query samples per task")
 
-    parser.add_argument("--outer_batch_size", default=20, type=int,
-                        help="Batch of task size")
     
     parser.add_argument("--inner_batch_size", default=32, type=int,
                         help="Training batch size in inner iteration")
 
 
-    parser.add_argument("--hessian_lr", default=1e-2, type=float,
-                        help="update for hessian")
+    parser.add_argument("--neumann_lr", default=1e-2, type=float,
+                        help="update for neumann series")
 
-    parser.add_argument("--hessian_q", default=5, type=int,
+    parser.add_argument("--hessian_q", default=3, type=int,
                         help="Q steps for hessian-inverse-vector product")
 
     parser.add_argument("--outer_update_lr", default= 1e-1, type=float,
@@ -115,20 +106,9 @@ def main():
     parser.add_argument("--inner_update_lr", default=1e-1, type=float,
                         help="Inner update learning rate")
     
-    parser.add_argument("--inner_update_step", default=64, type=int,
+    parser.add_argument("--inner_update_step", default=3, type=int,
                         help="Number of interation in the inner loop during train time")
 
-    parser.add_argument("--outer_update_step", default=1, type=int,
-                        help="Number of interation in the outer loop during train time")
-
-    parser.add_argument("--inner_update_step_eval", default=40, type=int,
-                        help="Number of interation in the inner loop during test time")
-    
-    parser.add_argument("--num_task_train", default=400, type=int,
-                        help="Total number of meta tasks for training")
-    
-    parser.add_argument("--num_task_test", default=50, type=int,
-                        help="Total number of tasks for testing")
 
     parser.add_argument("--grad_clip", default=False, type=bool,
                         help="whether grad clipping or not")
@@ -139,27 +119,19 @@ def main():
     parser.add_argument("--gamma", default=1e-3, type=float,
                         help="clipping threshold")
 
-    parser.add_argument("--no_meta", default=False, type=bool,
-                        help="whether use meta learning")
 
     parser.add_argument("--seed", default=2, type=int,
                         help="random seed")
 
-    # single loops parameters
     parser.add_argument("--beta", default=0.90, type=float,
                         help="momentum parameters")
 
     parser.add_argument("--nu", default=1e-2, type=float,
                         help="learning rate of z")
 
-    parser.add_argument("--xi", default=0.08, type=float,
-                        help="step-size ratio")
-
     parser.add_argument("--y_warm_start", default=3, type=int,
                         help="update steps for y")
 
-    parser.add_argument("--interval", default=2, type=int,
-                        help="update interval for y")
 
     parser.add_argument("--spider_loops", default=3, type=int,
                         help="the spider loops for vrbo")
@@ -168,8 +140,6 @@ def main():
     parser.add_argument("--update_interval", default=5, type=int,
                         help="update interval for vrbo")
 
-    parser.add_argument("--lamb", default=1e-1, type=float,
-                        help="lagerange coefficient")
 
     parser.add_argument("--imratio", default=0.8, type=float,
                         help="The ratio of imbalance")
@@ -201,6 +171,15 @@ def main():
 
     args = parser.parse_args()
     random_seed(args.seed)
+
+    if args.data == 'snli':
+        # for split in ['train', 'test']
+        train = SNLIDataset("../data", "train", noise_rate=args.noise_rate)
+        test = SNLIDataset("../data", "test")
+        print('Loading the train and test data!')
+        args.n_labels = 3
+        args.n_classes = 3
+            # split = split
     if args.data == 'sentment140':
         if os.path.isfile(f'data/train_data_{args.imratio}'):
             print('loading data...')
@@ -218,7 +197,6 @@ def main():
         # test = ImbalanceGenerator(testset, imratio=0.2)
         args.n_labels = 2
         args.n_classes = 2
-        training_size = train.__len__()
 
     else:
         print('Do not support this data')
@@ -230,119 +208,80 @@ def main():
         args.n_labels=2
 
 
-    if args.methods == 'aid':
-        args.outer_update_lr = 1e-2
+    if args.methods == 'stocbio':
+        args.outer_update_lr = 5e-3
         args.inner_update_lr = 1e-3
-        args.hessian_lr = 1e-2
-        args.grad_clip = False
-        # args.gamma = 1.0
         args.inner_update_step = 3
+        args.neumann_lr = 1e-2
         args.hessian_q= 3
-        # args.inner_batch_size = args.num_task_test
-        learner = aid.Learner(args, training_size)
+        learner = stocbio.Learner(args)
 
     if args.methods == 'ttsa':
         args.outer_update_lr = 5e-3
         args.inner_update_lr = 1e-2
-        args.hessian_lr = 1e-1
-        args.grad_clip = False
-        args.y_warm_start = 1
         args.inner_update_step = 3
-        # args.inner_batch_size = args.num_task_test
-        learner = ttsa.Learner(args, training_size)
+        args.neumann_lr = 1e-1
+        args.hessian_q= 3
+        learner = ttsa.Learner(args)
 
 
     elif args.methods == "saba":
         args.outer_update_lr = 1e-2
         args.inner_update_lr = 5e-3
-        args.grad_normalized = False
-        args.grad_clip = False
-        args.beta = 0.0
         args.nu = 1e-2
         args.inner_update_step = 1
-        # args.inner_batch_size = args.num_task_test
-        learner = saba.Learner(args, training_size)
+        learner = saba.Learner(args)
 
     elif args.methods == 'ma-soba':
         args.outer_update_lr = 1e-2
         args.inner_update_lr = 5e-3
-        args.grad_normalized = False
-        args.grad_clip = False
+        args.inner_update_step = 1
         args.beta = 0.9
         args.nu = 1e-1
-        args.inner_update_step = 1
-        # args.inner_batch_size = args.num_task_test
-        learner = ma_soba.Learner(args, training_size)
+        learner = ma_soba.Learner(args)
 
     elif args.methods == 'bo-rep':
         args.outer_update_lr = 1e-3
         args.inner_update_lr = 1e-3
-        args.grad_normalized =  True
-        args.grad_clip = False
-        # args.gamma = 1.0e-2
-        # args.y_warm_start = 10
-        args.xi = 1
         args.beta = 0.9
         args.nu = 1e-2
         args.y_warm_start = 3
         args.inner_update_step = 3
-        args.interval = 2
-        # args.inner_batch_size = args.num_task_test
-        learner = bo_rep.Learner(args, training_size)
+        args.update_interval = 2
+        learner = bo_rep.Learner(args)
 
 
     elif args.methods == 'sustain':
-        args.outer_update_lr = 1e-2
-        args.inner_update_lr = 5e-3
-        args.hessian_lr = 1e-2
-        args.grad_normalized =  True
-        args.grad_clip = False
+        args.outer_update_lr = 3e-2
+        args.inner_update_lr = 1e-2
+        args.neumann_lr = 1e-2
         args.hessian_q = 3
-        # args.y_warm_start = 10
-        args.gamma = 0.6
-        args.beta = 0.9
-        # args.alpha = 0.0
-        args.tau = 0.5
+        args.beta = 0.6
         args.inner_update_step = 1
-        # args.inner_batch_size = args.num_task_test
-        learner = sustain.Learner(args, training_size)
+        learner = sustain.Learner(args)
 
     elif args.methods == 'vrbo':
-        args.outer_update_lr = 1e-2
-        args.inner_update_lr = 5e-3
-        args.hessian_lr = 1e-2
-        args.grad_normalized =  True
-        args.grad_clip = False
+        args.outer_update_lr = 5e-2
+        args.inner_update_lr = 1e-2
+        args.neumann_lr = 1e-2
         args.hessian_q = 3
-        args.update_interval = 2
+        args.update_interval = 1
         args.spider_loops = 2
-        # args.y_warm_start = 10
-        args.gamma = 0.8
-        args.beta = 0.9
-        # args.alpha = 0.0
-        args.tau = 0.5
         args.inner_update_step = 1
-
         args.inner_batch_size = 64
-        learner = vrbo.Learner(args, training_size)
+        learner = vrbo.Learner(args)
 
     elif args.methods == 'accbo':
-        # args.outer_update_lr = 1e-1
-        # args.inner_update_lr = 5e-2
         args.outer_update_lr = 5e-3
         args.inner_update_lr = 5e-3
-        args.hessian_lr = 1e-1
-        args.grad_normalized =  True
-        args.grad_clip = False
+        args.neumann_lr = 1e-1
         args.hessian_q = 3
         args.y_warm_start = 3
         args.gamma = 0.5
         args.beta = 0.9
-        # args.alpha = 0.0
         args.tau = 0.5
         args.inner_update_step = 1
-        # args.inner_batch_size = args.num_task_test
-        learner = accbo.Learner(args, training_size)
+        learner = accbo.Learner(args)
     else:
         print('No such method, please change the method name!')
 

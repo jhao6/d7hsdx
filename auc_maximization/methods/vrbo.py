@@ -15,21 +15,14 @@ class Learner(nn.Module):
     """
     Meta Learner
     """
-    def __init__(self, args, training_size):
+    def __init__(self, args):
         """
         :param args:
         """
         super(Learner, self).__init__()
         self.args = args
-        self.num_labels = args.num_labels
-        self.outer_batch_size = args.outer_batch_size
-        self.inner_batch_size = args.inner_batch_size
         self.outer_update_lr  = args.outer_update_lr
-        self.old_outer_update_lr = args.outer_update_lr
         self.inner_update_lr  = args.inner_update_lr
-        self.inner_update_step = args.inner_update_step
-        self.inner_update_step_eval = args.inner_update_step_eval
-        self.training_size = training_size
         self.device =torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         self.model = RNN(
@@ -68,14 +61,9 @@ class Learner(nn.Module):
         self.upper_variables_old = [self.a, self.b] + list(self.model.parameters())
         self.outer_optimizer = SGD(self.upper_variables, lr=self.outer_update_lr)
         self.inner_optimizer = SGD([self.alpha], lr=self.inner_update_lr)
-        self.inner_stepLR = torch.optim.lr_scheduler.StepLR(self.inner_optimizer, step_size=args.epoch, gamma=0.2)
-        self.outer_stepLR = torch.optim.lr_scheduler.StepLR(self.outer_optimizer, step_size=args.epoch, gamma=0.2)
         self.aucloss = AUCMLoss(self.a, self.b, self.alpha)
         self.aucloss_old = AUCMLoss(self.a_old, self.b_old, self.alpha_old)
         self.model.train()
-        self.gamma = args.gamma
-        self.grad_clip = args.grad_clip
-        self.no_meta = args.no_meta
         self.criterion = nn.CrossEntropyLoss(reduction='none').to(self.device)
 
     def forward(self, train_loader, val_loader, training=True, epoch=0):
@@ -91,11 +79,10 @@ class Learner(nn.Module):
                 input_val, label_id_val, data_indx_val = next(iter(val_loader))
                 outputs_val = predict(self.model, input_val)
                 outer_loss = self.aucloss(outputs_val, label_id_val.to(self.device))
-                self.grad_x = [*self.stocbio(outer_loss, next(iter(train_loader)), next(iter(val_loader)))]
+                self.grad_x = [*self.stocbio(outer_loss, next(iter(val_loader)), next(iter(val_loader)))]
                 self.inner_optimizer.zero_grad()
-                input, label_id, data_indx = data
-                outputs = predict(self.model, input)
-                inner_loss = -self.aucloss(outputs, label_id.to(self.device))
+                outputs = predict(self.model, input_val)
+                inner_loss = -self.aucloss(outputs, label_id_val.to(self.device))
                 self.grad_y = torch.autograd.grad(inner_loss, self.alpha)
                 self.alpha.grad = self.grad_y[0].detach()
                 self.model_old = copy.deepcopy(self.model)
@@ -117,7 +104,7 @@ class Learner(nn.Module):
             self.b_old.data = self.b.data.clone()
 
             for i in range(self.args.spider_loops):
-                input_val, label_id_val, data_indx_val = next(iter(val_loader))
+                input_val, label_id_val, data_indx_val = data
                 outputs_val = predict(self.model, input_val)
                 outer_loss = self.aucloss(outputs_val, label_id_val.to(self.device))
                 train_batch = next(iter(train_loader))
@@ -132,13 +119,12 @@ class Learner(nn.Module):
                     self.grad_x[i] = self.grad_x_old[i] + (gx.detach() - gxo.detach())
                     self.grad_x_old[i].data = temp_hm
 
-                input, label, data_idx = next(iter(train_loader))
-                outputs = predict(self.model, input)
-                inner_loss = -self.aucloss(outputs, label.to(self.device))
+                outputs = predict(self.model, input_val)
+                inner_loss = -self.aucloss(outputs, label_id_val.to(self.device))
                 grad_y = torch.autograd.grad(inner_loss, self.alpha)
 
-                outputs = predict(self.model_old, input)
-                inner_loss = -self.aucloss_old(outputs, label.to(self.device))
+                outputs = predict(self.model_old, input_val)
+                inner_loss = -self.aucloss_old(outputs, label_id_val.to(self.device))
                 grad_y_on_old_model = torch.autograd.grad(inner_loss, self.alpha_old)
                 tmp_grad_y = self.grad_y[0].clone()
                 self.grad_y[0].data = self.grad_y_old[0].data.detach() +  (grad_y[0].detach() - grad_y_on_old_model[0].detach())
@@ -222,7 +208,7 @@ class Learner(nn.Module):
         Gy_gradient = torch.autograd.grad(inner_loss, self.alpha, create_graph=True)
 
         for g_grad, param in zip(Gy_gradient, self.alpha):
-            G_gradient.append((param - self.args.hessian_lr * g_grad).view(-1))
+            G_gradient.append((param - self.args.neumann_lr * g_grad).view(-1))
         # G_gradient = torch.reshape(torch.hstack(G_gradient), [-1])
 
         for _ in range(self.args.hessian_q):
@@ -230,7 +216,7 @@ class Learner(nn.Module):
             v_new = torch.autograd.grad(G_gradient, self.alpha, grad_outputs=v_0, retain_graph=True)
             v_0 = v_new[0].data.detach()
             z_list.append(v_0)
-        v_Q = self.args.hessian_lr * (torch.sum(torch.stack(z_list), dim=0))
+        v_Q = self.args.neumann_lr * (torch.sum(torch.stack(z_list), dim=0))
 
         # Gyx_gradient
         outputs = predict(self.model, val_data)
@@ -261,7 +247,7 @@ class Learner(nn.Module):
         Gy_gradient = torch.autograd.grad(inner_loss, self.alpha_old, create_graph=True)
 
         for g_grad, param in zip(Gy_gradient, self.alpha_old):
-            G_gradient.append((param - self.args.hessian_lr * g_grad).view(-1))
+            G_gradient.append((param - self.args.neumann_lr * g_grad).view(-1))
         # G_gradient = torch.reshape(torch.hstack(G_gradient), [-1])
 
         for _ in range(self.args.hessian_q):
@@ -269,7 +255,7 @@ class Learner(nn.Module):
             v_new = torch.autograd.grad(G_gradient, self.alpha_old, grad_outputs=v_0, retain_graph=True)
             v_0 = v_new[0].data.detach()
             z_list.append(v_0)
-        v_Q = self.args.hessian_lr * torch.sum(torch.stack(z_list), dim=0)
+        v_Q = self.args.neumann_lr * torch.sum(torch.stack(z_list), dim=0)
 
         # Gyx_gradient
         outputs = predict(self.model_old, val_data)
