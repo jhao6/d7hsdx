@@ -19,7 +19,6 @@ class Learner(nn.Module):
         self.args = args
         self.outer_update_lr  = args.outer_update_lr
         self.inner_update_lr  = args.inner_update_lr
-        self.inner_update_step = args.inner_update_step
         self.device =torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
         self.inner_model = RNN(

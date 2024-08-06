@@ -6,7 +6,7 @@ This paper investigates a class of stochastic bilevel optimization problems wher
 
 To run AUC maximation, (1) You could download the original data from [sentment140](http://cs.stanford.edu/people/alecmgo/trainingandtestdata.zip), or directly download the **preprocessed version** from [link](https://sendgb.com/zAjLJpQVWca).
 
-Put all the data files in `data/` directory
+Create 'data' directory in the current path by `mkdir data` and put all the data files in `data/` directory
 
 ### Run bilevel [algorithm] on AUC maximation:
 ```

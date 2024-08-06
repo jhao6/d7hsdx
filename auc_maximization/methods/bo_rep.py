@@ -65,7 +65,6 @@ class Learner(nn.Module):
         self.inner_model.train()
         self.beta = args.beta
         self.nu = args.nu
-        self.y_warm_start = args.y_warm_start
         self.criterion = nn.CrossEntropyLoss(reduction='none').to(self.device)
 
     def forward(self, train_loader, val_loader, training=True, epoch=0):
@@ -74,7 +73,7 @@ class Learner(nn.Module):
         self.inner_model.to(self.device)
 
         for step, data in enumerate(train_loader):
-            num_inner_update_step = self.y_warm_start if step%self.update_interval==0  else self.inner_update_step
+            num_inner_update_step = self.inner_update_step if step%self.update_interval==0  else 1
             all_loss = []
 
             input, label_id, data_indx = data

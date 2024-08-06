@@ -184,10 +184,6 @@ def main():
 
     st = time.time()
 
-    if args.data == 'news_data':
-        args.n_classes=2
-        args.n_labels=2
-
 
     if args.methods == 'stocbio':
         args.outer_update_lr = 5e-3
@@ -200,23 +196,20 @@ def main():
     if args.methods == 'ttsa':
         args.outer_update_lr = 5e-3
         args.inner_update_lr = 1e-2
-        args.inner_update_step = 3
+        args.inner_update_step = 1
         args.neumann_lr = 1e-1
         args.hessian_q= 3
         learner = ttsa.Learner(args)
-
 
     elif args.methods == "saba":
         args.outer_update_lr = 1e-2
         args.inner_update_lr = 5e-3
         args.nu = 1e-2
-        args.inner_update_step = 1
         learner = saba.Learner(args)
 
     elif args.methods == 'ma-soba':
         args.outer_update_lr = 1e-2
         args.inner_update_lr = 5e-3
-        args.inner_update_step = 1
         args.beta = 0.9
         args.nu = 1e-1
         learner = ma_soba.Learner(args)
@@ -226,7 +219,6 @@ def main():
         args.inner_update_lr = 1e-3
         args.beta = 0.9
         args.nu = 1e-2
-        args.y_warm_start = 3
         args.inner_update_step = 3
         args.update_interval = 2
         learner = bo_rep.Learner(args)
@@ -238,7 +230,6 @@ def main():
         args.neumann_lr = 1e-2
         args.hessian_q = 3
         args.beta = 0.6
-        args.inner_update_step = 1
         learner = sustain.Learner(args)
 
     elif args.methods == 'vrbo':
@@ -248,7 +239,6 @@ def main():
         args.hessian_q = 3
         args.update_interval = 1
         args.spider_loops = 2
-        args.inner_update_step = 1
         args.inner_batch_size = 64
         learner = vrbo.Learner(args)
 

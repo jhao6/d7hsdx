@@ -20,7 +20,6 @@ class Learner(nn.Module):
         self.num_labels = args.num_labels
         self.outer_update_lr = args.outer_update_lr
         self.inner_update_lr = args.inner_update_lr
-        self.inner_update_step = args.inner_update_step
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.collate_pad_ = self.collate_pad if args.data=='news_data' else self.collate_pad_snli
 
