@@ -221,9 +221,9 @@ def main():
 
     date = time.strftime('%Y-%m-%d-%H-%M',time.localtime(time.time()))
     file_name = f'{args.methods}_outlr{args.outer_update_lr}_inlr{args.inner_update_lr}_seed{args.seed}_{date}'
-    if not os.path.exists('logs/'+args.save_direct):
-        os.mkdir('logs/'+args.save_direct)
-    save_path = 'logs/'+args.save_direct
+    if not os.path.exists('logs/'):
+        os.mkdir('logs/')
+    save_path = 'logs/'
     total_time = (time.time() - st) / 3600
     files = open(os.path.join(save_path, file_name)+'.txt', 'w')
     files.write(str({'Exp configuration': str(args), 'AVG Train ACC': str(acc_all_train),
