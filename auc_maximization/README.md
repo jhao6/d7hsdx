@@ -4,7 +4,7 @@ To run AUC maximation, you can download the original data from [sentiment140](ht
 
 Create 'data' directory in the current path by `mkdir data` and put all the data files in `data/` directory.
 
-### Run bilevel [algorithm] on AUC maximation:
+### Run bilevel [algorithm] on AUC maximization:
 ```
     python main.py --methods [algorithm] 
 ```
