@@ -190,14 +190,12 @@ def main():
         args.inner_update_lr = 1e-3
         args.inner_update_step = 3
         args.neumann_lr = 1e-2
-        args.hessian_q= 3
         learner = stocbio.Learner(args)
 
     if args.methods == 'ttsa':
         args.outer_update_lr = 5e-3
         args.inner_update_lr = 1e-2
         args.neumann_lr = 1e-1
-        args.hessian_q= 3
         learner = ttsa.Learner(args)
 
     elif args.methods == "saba":
@@ -227,7 +225,6 @@ def main():
         args.outer_update_lr = 3e-2
         args.inner_update_lr = 1e-2
         args.neumann_lr = 1e-2
-        args.hessian_q = 3
         args.beta = 0.6
         learner = sustain.Learner(args)
 
@@ -235,7 +232,6 @@ def main():
         args.outer_update_lr = 5e-2
         args.inner_update_lr = 1e-2
         args.neumann_lr = 1e-2
-        args.hessian_q = 3
         args.update_interval = 1
         args.spider_loops = 2
         args.inner_batch_size = 64
@@ -245,7 +241,6 @@ def main():
         args.outer_update_lr = 5e-3
         args.inner_update_lr = 5e-3
         args.neumann_lr = 1e-1
-        args.hessian_q = 3
         args.y_warm_start = 3
         args.gamma = 0.5
         args.beta = 0.9
