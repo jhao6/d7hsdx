@@ -1,4 +1,4 @@
-This is code for paper "An Accelerated Algorithm for Stochastic Bilevel Optimization under Unbounded Smoothness"
+This is code for paper "An Accelerated Algorithm for Stochastic Bilevel Optimization under Unbounded Smoothness".
 
 To run data hyper-cleaning on SNLI experiments, you can download the original data from [SNLI Corpus](https://nlp.stanford.edu/projects/snli/), or directly download the **preprocessed version** from [link](https://sendgb.com/zAjLJpQVWca).
 
