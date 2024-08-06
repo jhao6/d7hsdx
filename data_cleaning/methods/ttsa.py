@@ -24,7 +24,6 @@ class Learner(nn.Module):
         self.args = args
         self.outer_update_lr = args.outer_update_lr
         self.inner_update_lr = args.inner_update_lr
-        self.inner_update_step = args.inner_update_step
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.training_size = training_size
         if args.data == 'snli':
@@ -55,12 +54,11 @@ class Learner(nn.Module):
             all_loss = []
 
             input, label_id, data_indx = data
-            for i in range(self.args.inner_update_step):
-                outputs = predict(self.inner_model, input)
-                loss = torch.mean(torch.sigmoid(self.lambda_x[data_indx]) * self.criterion(outputs, label_id.to(
-                    self.device))) + 0.0001 * sum( [x.norm().pow(2) for x in self.inner_model.parameters()]).sqrt()
-                loss.backward()
-                self.inner_optimizer.step()
+            outputs = predict(self.inner_model, input)
+            loss = torch.mean(torch.sigmoid(self.lambda_x[data_indx]) * self.criterion(outputs, label_id.to(
+                self.device))) + 0.0001 * sum( [x.norm().pow(2) for x in self.inner_model.parameters()]).sqrt()
+            loss.backward()
+            self.inner_optimizer.step()
             all_loss.append(loss.item())
 
             q_input, q_label_id, q_indx = next(iter(val_loader))

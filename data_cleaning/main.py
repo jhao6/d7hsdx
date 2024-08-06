@@ -139,7 +139,6 @@ def main():
     elif args.methods == 'ttsa':
         args.outer_update_lr = 1e-3
         args.inner_update_lr = 1e-2
-        args.inner_update_step = 1
         learner = ttsa.Learner(args, training_size)
 
 
