@@ -6,9 +6,9 @@ Create 'data' directory in the current path by `mkdir data` and put all the data
 
 
 ### Requirements
+python 3.9,
 numpy,
 sklearn,
-python 3.9, 
 Pytorch>2.0
 
 ### Run bilevel [algorithm] on data hyper-cleaning:

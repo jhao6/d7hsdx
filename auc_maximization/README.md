@@ -5,9 +5,9 @@ To run AUC maximation, you should download sentiment140 first, or directly downl
 Create 'data' directory in the current path by `mkdir data` and put all the data files in `data/` directory.
 
 ### Requirements
+python 3.9,
 numpy,
 sklearn,
-python 3.9, 
 Pytorch>2.0
 
 ### Run bilevel [algorithm] on AUC maximization:
