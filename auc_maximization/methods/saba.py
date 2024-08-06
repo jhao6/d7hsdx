@@ -1,10 +1,7 @@
 from torch import nn
 from torch.nn import functional as F
-from torch.utils.data import DataLoader, RandomSampler
 from torch.optim import SGD
-import gc
 import torch
-from sklearn.metrics import accuracy_score
 import numpy as np
 from .RNN_net import RNN
 from aucloss import AUCMLoss, roc_auc_score
@@ -103,8 +100,6 @@ class Learner(nn.Module):
     def forward(self, train_loader, val_loader, training=True, epoch=0):
         task_accs = []
         task_loss = []
-        sum_gradients = []
-        num_inner_update_step =  self.inner_update_step
         self.inner_model.to(self.device)
         for step, data in enumerate(train_loader):
             all_loss = []
@@ -127,7 +122,6 @@ class Learner(nn.Module):
             hyper_grad = self.hypergradient(self.args, hvp_update, q_loss, valid_batch)
             for i, param in enumerate(self.upper_variables):
                 param.grad = hyper_grad[i]
-
 
             self.outer_optimizer.step()
             self.outer_optimizer.zero_grad()
@@ -169,7 +163,7 @@ class Learner(nn.Module):
         self.last_F_grad_lower = Fy_gradient
         self.last_F_grad_upper = Fx_gradient
         self.z_params -= args.nu * (jacob_flat.detach() - F_grad_y)
-        # Gyx_gradient
+
         output = predict(self.inner_model, val_data)
         loss = -self.aucloss(output, val_labels.to(self.device))
         Gy_gradient = torch.autograd.grad(loss, self.alpha, retain_graph=True, create_graph=True)[0]
@@ -203,13 +197,9 @@ class Learner(nn.Module):
     def collate_pad_snli(self, data_points):
         """ Pad data points with zeros to fit length of longest data point in batch. """
         s_embeds = data_points[0] if type(data_points[0]) == list or type(data_points[0]) == tuple else data_points[1]
-        # s_embeds = data_points[0]
-        # s2_embeds = data_points[0] if type(data_points[0]) == list or type(data_points[0]) == tuple else data_points[1]
         targets = data_points[1] if type(data_points[0]) == list or type(data_points[0]) == tuple else data_points[0]
-        # targets = data_points[1]
         s1_embeds = [x for x in s_embeds[0]]
         s2_embeds = [x for x in s_embeds[1]]
-        # targets = [x[1] for x in data_points]
 
         # Get sentences for batch and their lengths.
         s1_lens = np.array([sent.shape[0] for sent in s1_embeds])
@@ -242,9 +232,6 @@ class Learner(nn.Module):
 
 def predict(net, inputs):
     """ Get predictions for a single batch. """
-    # snli dataaset
-    # (s1_embed, s2_embed), (s1_lens, s2_lens) = inputs
-    # outputs = net((s1_embed.cuda(), s1_lens), (s2_embed.cuda(), s2_lens))
     s_embed, s_lens = inputs
     outputs = net((s_embed.cuda(), s_lens))
     return outputs

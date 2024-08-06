@@ -1,12 +1,8 @@
 from torch import nn
 from torch.nn import functional as F
-from torch.utils.data import DataLoader, RandomSampler
 from torch.optim import SGD
-from copy import deepcopy
-import gc
 import torch
 import copy
-from sklearn.metrics import accuracy_score
 import numpy as np
 from .RNN_net import RNN
 from aucloss import AUCMLoss, roc_auc_score
@@ -60,8 +56,6 @@ class Learner(nn.Module):
         self.upper_variables_old = [self.a, self.b] + list(self.inner_model.parameters())
         self.outer_optimizer = SGD(self.upper_variables, lr=self.outer_update_lr)
         self.inner_optimizer = SGD([self.alpha], lr=self.inner_update_lr)
-        self.inner_stepLR = torch.optim.lr_scheduler.StepLR(self.inner_optimizer, step_size=args.epoch, gamma=0.2)
-        self.outer_stepLR = torch.optim.lr_scheduler.StepLR(self.outer_optimizer, step_size=args.epoch, gamma=0.2)
         self.aucloss = AUCMLoss(self.a, self.b, self.alpha)
         self.aucloss_old = AUCMLoss(self.a_old, self.b_old, self.alpha_old)
         self.inner_model.train()
@@ -69,10 +63,8 @@ class Learner(nn.Module):
         self.criterion = nn.CrossEntropyLoss(reduction='none').to(self.device)
 
     def forward(self, train_loader, val_loader, training=True, epoch=0):
-        # self.model.load_state_dict(torch.load('checkpoints/itd-model.pkl'))
         task_aucs = []
         task_loss = []
-        num_inner_update_step = self.inner_update_step
 
         for step, data in enumerate(train_loader):
             self.inner_model.to(self.device)

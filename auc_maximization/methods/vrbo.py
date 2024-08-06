@@ -1,12 +1,8 @@
 from torch import nn
 from torch.nn import functional as F
-from torch.utils.data import DataLoader, RandomSampler
 from torch.optim import SGD
-from copy import deepcopy
-import gc
 import torch
 import copy
-from sklearn.metrics import accuracy_score
 import numpy as np
 from .RNN_net import RNN
 from aucloss import AUCMLoss, roc_auc_score
@@ -67,7 +63,6 @@ class Learner(nn.Module):
         self.criterion = nn.CrossEntropyLoss(reduction='none').to(self.device)
 
     def forward(self, train_loader, val_loader, training=True, epoch=0):
-        # self.model.load_state_dict(torch.load('checkpoints/itd-model.pkl'))
         task_aucs = []
         task_loss = []
 
@@ -147,9 +142,6 @@ class Learner(nn.Module):
 
             print(f'Task loss: {outer_loss.detach().item():.4f}, Task auc: {auc:.4f}')
 
-        # self.inner_stepLR.step()
-        # self.outer_stepLR.step()
-
         return np.mean(task_aucs), np.mean(task_loss)
 
     def collate_pad_(self, data_points):
@@ -198,7 +190,6 @@ class Learner(nn.Module):
         Fy_gradient = torch.autograd.grad(loss, self.alpha, retain_graph=True)
         F_gradient = Fy_gradient[0]
         v_0 = F_gradient.detach()
-        # Fx_gradient = [g_param.view(-1) for g_param in Fx_gradient]
         Fx_gradient = torch.autograd.grad(loss, self.upper_variables)
         # Hessian
         z_list = []
@@ -209,10 +200,8 @@ class Learner(nn.Module):
 
         for g_grad, param in zip(Gy_gradient, self.alpha):
             G_gradient.append((param - self.args.neumann_lr * g_grad).view(-1))
-        # G_gradient = torch.reshape(torch.hstack(G_gradient), [-1])
 
         for _ in range(self.args.hessian_q):
-            # Jacobian = torch.matmul(G_gradient, v_0)
             v_new = torch.autograd.grad(G_gradient, self.alpha, grad_outputs=v_0, retain_graph=True)
             v_0 = v_new[0].data.detach()
             z_list.append(v_0)
@@ -237,7 +226,6 @@ class Learner(nn.Module):
         Fy_gradient = torch.autograd.grad(loss, self.alpha_old, retain_graph=True)
         F_gradient = Fy_gradient[0]
         v_0 = F_gradient.detach()
-        # Fx_gradient = [g_param.view(-1) for g_param in Fx_gradient]
         Fx_gradient = torch.autograd.grad(loss, self.upper_variables_old)
         # Hessian
         z_list = []
@@ -248,16 +236,13 @@ class Learner(nn.Module):
 
         for g_grad, param in zip(Gy_gradient, self.alpha_old):
             G_gradient.append((param - self.args.neumann_lr * g_grad).view(-1))
-        # G_gradient = torch.reshape(torch.hstack(G_gradient), [-1])
 
         for _ in range(self.args.hessian_q):
-            # Jacobian = torch.matmul(G_gradient, v_0)
             v_new = torch.autograd.grad(G_gradient, self.alpha_old, grad_outputs=v_0, retain_graph=True)
             v_0 = v_new[0].data.detach()
             z_list.append(v_0)
         v_Q = self.args.neumann_lr * torch.sum(torch.stack(z_list), dim=0)
 
-        # Gyx_gradient
         outputs = predict(self.model_old, val_data)
         inner_loss = -self.aucloss_old(outputs, val_labels.to(self.device))
         Gy_gradient = torch.autograd.grad(inner_loss, self.alpha_old, retain_graph=True, create_graph=True)

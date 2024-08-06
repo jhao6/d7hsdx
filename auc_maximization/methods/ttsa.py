@@ -1,10 +1,7 @@
 from torch import nn
 from torch.nn import functional as F
-from torch.utils.data import DataLoader, RandomSampler
 from torch.optim import SGD
-import gc
 import torch
-from sklearn.metrics import accuracy_score
 import numpy as np
 from .RNN_net import RNN
 from aucloss import AUCMLoss, roc_auc_score
@@ -43,18 +40,13 @@ class Learner(nn.Module):
         self.upper_variables = [self.a, self.b] + list(self.inner_model.parameters())
         self.outer_optimizer = SGD(self.upper_variables, lr=self.outer_update_lr)
         self.inner_optimizer = SGD([self.alpha], lr=self.inner_update_lr)
-        self.inner_stepLR = torch.optim.lr_scheduler.StepLR(self.inner_optimizer, step_size=args.epoch, gamma=0.2)
-        self.outer_stepLR = torch.optim.lr_scheduler.StepLR(self.outer_optimizer, step_size=args.epoch, gamma=0.2)
         self.aucloss = AUCMLoss(self.a, self.b, self.alpha)
         self.inner_model.train()
         self.criterion = nn.CrossEntropyLoss(reduction='none').to(self.device)
 
     def forward(self, train_loader, val_loader, training=True, epoch=0):
-        # self.model.load_state_dict(torch.load('checkpoints/itd-model.pkl'))
         task_aucs = []
         task_loss = []
-        sum_gradients = []
-        num_inner_update_step = self.inner_update_step
 
         for step, data in enumerate(train_loader):
             self.inner_model.to(self.device)
@@ -73,7 +65,6 @@ class Learner(nn.Module):
             q_loss = self.aucloss(q_outputs, q_label_id.to(self.device))
 
             hypergradient = self.stocbio(q_loss, next(iter(train_loader)), next(iter(train_loader)))
-            # print(f'Task loss: {np.mean(all_loss):.4f}')
             for i, param in enumerate(self.upper_variables):
                 param.grad = hypergradient[i]
             self.outer_optimizer.step()
@@ -88,9 +79,6 @@ class Learner(nn.Module):
             task_loss.append(q_loss.detach().cpu().numpy())
             torch.cuda.empty_cache()
             print(f'Task loss: {q_loss.detach().item():.4f}, Task auc: {auc:.4f}')
-
-        # self.inner_stepLR.step()
-        # self.outer_stepLR.step()
 
         return np.mean(task_aucs), np.mean(task_loss)
 
@@ -139,7 +127,6 @@ class Learner(nn.Module):
         Fy_gradient = torch.autograd.grad(loss, self.alpha, retain_graph=True)
         F_gradient = Fy_gradient[0]
         v_0 = F_gradient.detach()
-        # Fx_gradient = [g_param.view(-1) for g_param in Fx_gradient]
         Fx_gradient = torch.autograd.grad(loss, self.upper_variables)
         # Hessian
         z_list = []
@@ -150,16 +137,13 @@ class Learner(nn.Module):
 
         for g_grad, param in zip(Gy_gradient, self.alpha):
             G_gradient.append((param - self.args.neumann_lr * g_grad).view(-1))
-        # G_gradient = torch.reshape(torch.hstack(G_gradient), [-1])
 
         for _ in range(self.args.hessian_q):
-            # Jacobian = torch.matmul(G_gradient, v_0)
             v_new = torch.autograd.grad(G_gradient, self.alpha, grad_outputs=v_0, retain_graph=True)
             v_0 = v_new[0].data.detach()
             z_list.append(v_0)
         index = np.random.randint(self.args.hessian_q)
         v_Q = self.args.neumann_lr * z_list[index]
-        # Gyx_gradient
         outputs = predict(self.inner_model, val_data)
         inner_loss = -self.aucloss(outputs, train_labels.to(self.device))
         Gy_gradient = torch.autograd.grad(inner_loss, self.alpha, retain_graph=True, create_graph=True)

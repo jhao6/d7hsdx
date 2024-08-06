@@ -1,10 +1,7 @@
 from torch import nn
 from torch.nn import functional as F
-from torch.utils.data import DataLoader, RandomSampler
 from torch.optim import SGD
-import gc
 import torch
-from sklearn.metrics import accuracy_score
 import numpy as np
 from .RNN_net import RNN
 from aucloss import AUCMLoss, roc_auc_score
@@ -64,8 +61,6 @@ class Learner(nn.Module):
         self.z_params = nn.init.xavier_uniform_(self.z_params).to(self.device)[0]
         self.outer_optimizer = SGD(self.upper_variables, lr=self.outer_update_lr)
         self.inner_optimizer = SGD([self.alpha], lr=self.inner_update_lr)
-        self.inner_stepLR = torch.optim.lr_scheduler.StepLR(self.inner_optimizer, step_size=args.epoch, gamma=0.2)
-        self.outer_stepLR = torch.optim.lr_scheduler.StepLR(self.outer_optimizer, step_size=args.epoch, gamma=0.2)
         self.aucloss = AUCMLoss(self.a, self.b, self.alpha)
         self.inner_model.train()
         self.beta = args.beta
@@ -74,8 +69,6 @@ class Learner(nn.Module):
     def forward(self, train_loader, val_loader, training=True, epoch=0):
         task_accs = []
         task_loss = []
-        sum_gradients = []
-        num_inner_update_step =  self.inner_update_step
         self.inner_model.to(self.device)
         for step, data in enumerate(train_loader):
             all_loss = []
@@ -109,8 +102,6 @@ class Learner(nn.Module):
             task_loss.append(q_loss.detach().cpu().numpy())
             torch.cuda.empty_cache()
             print(f'Task loss: {q_loss.detach().cpu().item():.4f}, Task auc: {auc:.4f}')
-        # self.inner_stepLR.step()
-        # self.outer_stepLR.step()
         return np.mean(task_accs),  np.mean(task_loss)
 
     def test(self, test_loader):
@@ -137,7 +128,6 @@ class Learner(nn.Module):
         Fx_gradient = torch.autograd.grad(loss, self.upper_variables)
         self.z_params -= args.nu * (jacob_flat.detach() - Fy_gradient[0].data)
 
-        # Gyx_gradient
         output = predict(self.inner_model, val_data)
         loss = -self.aucloss(output, val_labels.to(self.device))
         Gy_gradient = torch.autograd.grad(loss, self.alpha, retain_graph=True, create_graph=True)
@@ -172,13 +162,9 @@ class Learner(nn.Module):
     def collate_pad_snli(self, data_points):
         """ Pad data points with zeros to fit length of longest data point in batch. """
         s_embeds = data_points[0] if type(data_points[0]) == list or type(data_points[0]) == tuple else data_points[1]
-        # s_embeds = data_points[0]
-        # s2_embeds = data_points[0] if type(data_points[0]) == list or type(data_points[0]) == tuple else data_points[1]
         targets = data_points[1] if type(data_points[0]) == list or type(data_points[0]) == tuple else data_points[0]
-        # targets = data_points[1]
         s1_embeds = [x for x in s_embeds[0]]
         s2_embeds = [x for x in s_embeds[1]]
-        # targets = [x[1] for x in data_points]
 
         # Get sentences for batch and their lengths.
         s1_lens = np.array([sent.shape[0] for sent in s1_embeds])
@@ -211,9 +197,6 @@ class Learner(nn.Module):
 
 def predict(net, inputs):
     """ Get predictions for a single batch. """
-    # snli dataaset
-    # (s1_embed, s2_embed), (s1_lens, s2_lens) = inputs
-    # outputs = net((s1_embed.cuda(), s1_lens), (s2_embed.cuda(), s2_lens))
     s_embed, s_lens = inputs
     outputs = net((s_embed.cuda(), s_lens))
     return outputs

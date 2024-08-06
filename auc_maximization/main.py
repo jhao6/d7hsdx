@@ -1,7 +1,4 @@
 import copy
-import json
-from random import shuffle
-from collections import Counter
 import torch
 import time
 import logging
@@ -9,14 +6,9 @@ import argparse
 import os
 logger = logging.getLogger()
 logger.setLevel(logging.CRITICAL)
-# os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-# from reptile import Learner
 from methods import stocbio, saba, ma_soba, ttsa, bo_rep, accbo, sustain, vrbo
-from task import MetaTask
-from data_loader import SNLIDataset, Sent140Dataset,  collate_pad, collate_pad_double
+from data_loader import SNLIDataset, Sent140Dataset,  collate_pad
 from torch.utils.data import DataLoader
-# from task_snli import MetaTask_snli
 import random
 import numpy as np
 torch.backends.cudnn.enabled = False
@@ -68,7 +60,7 @@ def main():
     parser.add_argument("--data", default='sentment140', type=str,
                         help="dataset: [news_data, snli, sentment140]", )
 
-    parser.add_argument("--data_path", default='../data/news-data/dataset.json', type=str,
+    parser.add_argument("--data_path", default='../data/dataset.json', type=str,
                         help="Path to dataset file")
 
     parser.add_argument("--batch_size", default=32, type=int,
@@ -172,14 +164,6 @@ def main():
     args = parser.parse_args()
     random_seed(args.seed)
 
-    if args.data == 'snli':
-        # for split in ['train', 'test']
-        train = SNLIDataset("../data", "train", noise_rate=args.noise_rate)
-        test = SNLIDataset("../data", "test")
-        print('Loading the train and test data!')
-        args.n_labels = 3
-        args.n_classes = 3
-            # split = split
     if args.data == 'sentment140':
         if os.path.isfile(f'data/train_data_{args.imratio}'):
             print('loading data...')
@@ -192,9 +176,7 @@ def main():
             torch.save(train, f'data/train_data_{args.imratio}')
             torch.save(val, f'data/val_data_{args.imratio}')
             test = Sent140Dataset("../data", "test")
-            # test = ImbalanceGenerator(testset, imratio=args.imratio, split=False)
             torch.save(test, f'data/test_data_{args.imratio}')
-        # test = ImbalanceGenerator(testset, imratio=0.2)
         args.n_labels = 2
         args.n_classes = 2
 
@@ -291,8 +273,7 @@ def main():
     loss_all_test = []
     auc_all_train = []
     loss_all_train = []
-    # train_loader = DataLoader(train, shuffle=True,  batch_size=args.batch_size, collate_fn=collate_pad)
-    # test_loader = DataLoader(test, batch_size=args.batch_size, collate_fn=collate_pad)
+
     for epoch in range(args.epoch):
         print(f"[epoch/epochs]:{epoch}/{args.epoch}")
         train_loader = DataLoader(train, shuffle=True, batch_size=args.inner_batch_size, collate_fn=collate_pad)
@@ -316,11 +297,9 @@ def main():
 
     date = time.strftime('%Y-%m-%d-%H-%M',time.localtime(time.time()))
     file_name = f'{args.methods}_outlr{args.outer_update_lr}_inlr{args.inner_update_lr}_seed{args.seed}_{date}'
-    # acc_file_name = f'meta_learning_{args.methods}_{date}'
     if not os.path.exists('logs/'):
         os.mkdir('logs/')
     save_path = 'logs/'
-    # save_path = os.path.join(save_path, 'turning_gamma')
     total_time = (time.time() - st) / 3600
     files = open(os.path.join(save_path, file_name)+'.txt', 'w')
     files.write(str({'Exp configuration': str(args), 'AVG Train AUC': str(auc_all_train),
