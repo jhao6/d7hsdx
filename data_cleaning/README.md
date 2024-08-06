@@ -7,7 +7,7 @@ This paper investigates a class of stochastic bilevel optimization problems wher
 
 To run data hyper-cleaning on SNLI experiments, (1) You could download the original data from[SNLI Corpus](https://nlp.stanford.edu/projects/snli/), or directly download the **preprocessed version** from [link](https://sendgb.com/zAjLJpQVWca).
 
-Put all the data files in `data/` directory
+Create 'data' directory in the current path by `mkdir data` and put all the data files in `data/` directory
 
 ### Run bilevel [algorithm] on data hyper-cleaning:
 ```

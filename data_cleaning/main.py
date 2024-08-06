@@ -162,7 +162,7 @@ def main():
         args.inner_update_lr = 1e-2
         args.beta = 0.9
         args.nu = 1e-2
-        args.inner_update_step = 1
+        args.inner_update_step = 3
         args.update_interval = 2
         learner = bo_rep.Learner(args, training_size)
 

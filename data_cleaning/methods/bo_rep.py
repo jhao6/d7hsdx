@@ -61,7 +61,7 @@ class Learner(nn.Module):
         task_loss = []
         self.inner_model.to(self.device)
         for step, data in enumerate(train_loader):
-            num_inner_update_step = self.y_warm_start if step%self.update_interval==0  else self.inner_update_step
+            num_inner_update_step = self.inner_update_step if step%self.update_interval==0  else  1
             all_loss = []
 
             input, label_id, data_indx = next(iter(train_loader))
