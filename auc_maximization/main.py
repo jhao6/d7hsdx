@@ -108,9 +108,8 @@ def main():
     parser.add_argument("--grad_normalized", default=True, type=bool,
                         help="whether grad normalized or not")
 
-    parser.add_argument("--gamma", default=1e-3, type=float,
-                        help="clipping threshold")
-
+    parser.add_argument("--gamma", default=0.9, type=float,
+                        help="nesterov momentum")
 
     parser.add_argument("--seed", default=2, type=int,
                         help="random seed")

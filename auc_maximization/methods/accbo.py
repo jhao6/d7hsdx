@@ -25,18 +25,6 @@ class Learner(nn.Module):
         self.inner_update_step = args.inner_update_step
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.collate_pad_ = self.collate_pad if args.data=='news_data' else self.collate_pad_snli
-        if args.data == 'news_data':
-            self.meta_model = RNN(
-                word_embed_dim=args.word_embed_dim,
-                encoder_dim=args.encoder_dim,
-                n_enc_layers=args.n_enc_layers,
-                dpout_model=0.0,
-                dpout_fc=0.0,
-                fc_dim=args.fc_dim,
-                n_classes=args.n_classes,
-                pool_type=args.pool_type,
-                linear_fc=args.linear_fc
-            )
         if args.data == 'snli' or 'sentment140':
             self.inner_model = RNN(
                 word_embed_dim=args.word_embed_dim,
@@ -79,6 +67,7 @@ class Learner(nn.Module):
         num_inner_update_step = self.y_warm_start if epoch == 0  else self.inner_update_step
         warm_start = False
         for step, data in enumerate(train_loader):
+            # Option 1 for updating the lower-level varibles
             if epoch == 0:
                 for i in range(0, num_inner_update_step):
                     self.inner_optimizer.zero_grad()
@@ -110,9 +99,10 @@ class Learner(nn.Module):
             input_val, label_id_val, data_indx_val = next(iter(val_loader))
             outputs = predict(self.inner_model, input_val)
             outer_loss = self.aucloss(outputs, label_id_val.to(self.device))
-
+            # calculate the neumann series and hypergradients
             self.neumann_series(outer_loss, next(iter(train_loader)), next(iter(train_loader)))
             self.alpha.data = temp_alpha
+            # gradient normalization
             for i, param in enumerate(self.upper_variables):
                 param.grad = self.hyper_momentum[i]/self.hyper_momentum[i].norm()
 
@@ -121,13 +111,12 @@ class Learner(nn.Module):
 
             logits = F.softmax(outputs, dim=1)[:, -1]
             label_id = label_id_val.detach().cpu().numpy().tolist()
-
+            # calculate the training loss and auc
             auc = roc_auc_score(label_id, logits.detach().cpu().numpy())
             task_aucs.append(auc)
             task_loss.append(outer_loss.detach().cpu().numpy())
             torch.cuda.empty_cache()
             print(f'Task loss: {outer_loss.detach().item():.4f}, Task auc: {auc:.4f}')
-        print(f'step={step}')
         return np.mean(task_aucs),  np.mean(task_loss)
 
     def test(self, test_loader):
@@ -153,61 +142,40 @@ class Learner(nn.Module):
 
 
     def neumann_series(self, outer_loss, train_data_batch, val_data_batch):
-            input_tr, label_id_tr, data_indx_tr = train_data_batch
-            input_val, label_id_val, data_indx_val = val_data_batch
-            Fy_gradient = torch.autograd.grad(outer_loss, self.alpha, retain_graph=True)
-            v_0 = Fy_gradient[0].data.detach()
+        input_tr, label_id_tr, data_indx_tr = train_data_batch
+        input_val, label_id_val, data_indx_val = val_data_batch
+        Fy_gradient = torch.autograd.grad(outer_loss, self.alpha, retain_graph=True)
+        v_0 = Fy_gradient[0].data.detach()
+        z_list = []
+        Fx_gradient = torch.autograd.grad(outer_loss, self.upper_variables)
+        self.inner_optimizer.zero_grad()
+        self.outer_optimizer.zero_grad()
+        output = predict(self.inner_model, input_tr)
+        inner_loss = -self.aucloss(output, label_id_tr.to(self.device))
+        Gy_gradient = torch.autograd.grad(inner_loss, self.alpha, create_graph=True)
+        G_gradient = []
+        for g_grad, param in zip(Gy_gradient, self.alpha):
+            G_gradient.append((param - self.args.neumann_lr * g_grad).view(-1))
+        # Q loops for estimating the neumann series
+        for _ in range(self.args.hessian_q):
+            v_new = torch.autograd.grad(G_gradient, self.alpha, grad_outputs=v_0, retain_graph=True)
+            v_0 = v_new[0].data.detach()
+            z_list.append(v_0)
+        index = np.random.randint(self.args.hessian_q)
+        v_Q = self.args.neumann_lr * z_list[index]
 
-            z_list = []
-            Fx_gradient = torch.autograd.grad(outer_loss, self.upper_variables)
-            self.inner_optimizer.zero_grad()
-            self.outer_optimizer.zero_grad()
-            output = predict(self.inner_model, input_tr)
-            inner_loss = -self.aucloss(output, label_id_tr.to(self.device))
-            Gy_gradient = torch.autograd.grad(inner_loss, self.alpha, create_graph=True)
-            G_gradient = []
-            for g_grad, param in zip(Gy_gradient, self.alpha):
-                G_gradient.append((param - self.args.neumann_lr * g_grad).view(-1))
-            for _ in range(self.args.hessian_q):
-                v_new = torch.autograd.grad(G_gradient, self.alpha, grad_outputs=v_0, retain_graph=True)
-                v_0 = v_new[0].data.detach()
-                z_list.append(v_0)
-            index = np.random.randint(self.args.hessian_q)
-            v_Q = self.args.neumann_lr * z_list[index]
-
-
-            output = predict(self.inner_model, input_val)
-            inner_loss = -self.aucloss(output, label_id_val.to(self.device))
-            Gy_gradient = torch.autograd.grad(inner_loss, self.alpha, retain_graph=True, create_graph=True)
-            Gyxv_gradients = torch.autograd.grad(Gy_gradient, self.upper_variables, grad_outputs=v_Q,  allow_unused=True)
-            for i, (f_x, g_yxv) in enumerate(zip(Fx_gradient, Gyxv_gradients)):
-                if g_yxv is not None:
-                    current_neumann_series = (f_x - g_yxv).data.clone()
-                else:
-                    current_neumann_series = f_x.data.clone()
-                self.hyper_momentum[i] = self.args.beta * self.hyper_momentum[i] + (1 - self.args.beta) * current_neumann_series \
-                                        + self.args.beta * (current_neumann_series - self.neumann_series_history[i] )
-                self.neumann_series_history[i] = current_neumann_series
-
-    def hypergradient(self, args, jacob_flat, loss, query_batch):
-        val_data, val_labels, data_idx = query_batch
-        loss.backward()
-
-        Fy_gradient = [g_param.grad.detach().view(-1) for g_param in self.inner_model.parameters()]
-        Fy_gradient_flat = torch.unsqueeze(torch.reshape(torch.hstack(Fy_gradient), [-1]), 1)
-        self.z_params -= args.nu * (jacob_flat - Fy_gradient_flat)
-
-        output = predict(self.inner_model, val_data)
-        loss = torch.mean(
-            torch.sigmoid(self.lambda_x[data_idx]) * F.cross_entropy(output, val_labels.cuda(), reduction='none')) + 0.0001 * sum(
-            [x.norm().pow(2) for x in self.inner_model.parameters()]).sqrt()
-        Gy_gradient = torch.autograd.grad(loss, self.inner_model.parameters(), retain_graph=True, create_graph=True)
-        Gy_params = [Gy_param.view(-1) for Gy_param in Gy_gradient]
-        Gy_gradient_flat = torch.reshape(torch.hstack(Gy_params), [-1])
-        Gyxz_gradient = torch.autograd.grad(-torch.matmul(Gy_gradient_flat, self.z_params.detach()), self.lambda_x)
-        self.hyper_momentum = [args.beta * h + (1 - args.beta) *  Gyxz for (h, Gyxz) in
-                          zip(self.hyper_momentum,  Gyxz_gradient)]
-
+        output = predict(self.inner_model, input_val)
+        inner_loss = -self.aucloss(output, label_id_val.to(self.device))
+        Gy_gradient = torch.autograd.grad(inner_loss, self.alpha, retain_graph=True, create_graph=True)
+        Gyxv_gradients = torch.autograd.grad(Gy_gradient, self.upper_variables, grad_outputs=v_Q,  allow_unused=True)
+        for i, (f_x, g_yxv) in enumerate(zip(Fx_gradient, Gyxv_gradients)):
+            if g_yxv is not None:
+                current_neumann_series = (f_x - g_yxv).data.clone()
+            else:
+                current_neumann_series = f_x.data.clone()
+            self.hyper_momentum[i] = self.args.beta * self.hyper_momentum[i] + (1 - self.args.beta) * current_neumann_series \
+                                    + self.args.beta * (current_neumann_series - self.neumann_series_history[i] )
+            self.neumann_series_history[i] = current_neumann_series
 
 
     def collate_pad(self, data_points):
