@@ -1,16 +1,11 @@
 This is code for paper "An Accelerated Algorithm for Stochastic Bilevel Optimization under Unbounded Smoothness"
 
-### Abstract
+To run data hyper-cleaning on SNLI experiments, you can download the original data from [SNLI Corpus](https://nlp.stanford.edu/projects/snli/), or directly download the **preprocessed version** from [link](https://sendgb.com/zAjLJpQVWca).
 
-This paper investigates a class of stochastic bilevel optimization problems where the upper-level function is nonconvex with potentially unbounded smoothness and the lower-level problem is strongly convex. These problems have significant applications in sequential data learning, such as text classification using recurrent neural networks. The unbounded smoothness is characterized by the smoothness constant of the upper-level function scaling linearly with the gradient norm, lacking a uniform upper bound. Existing state-of-the-art algorithms require $\widetilde{O}(1/\epsilon^4)$ oracle calls of stochastic gradient or Hessian/Jacobian-vector product to find an $\epsilon$-stationary point. However, it remains unclear if we can further improve the convergence rate when the assumptions for the function in the population level also hold for each random realization almost surely (e.g., Lipschitzness of each realization of the stochastic gradient).  To address this issue, we propose a new  Accelerated Bilevel Optimization algorithm named AccBO. The algorithm updates the upper-level variable by normalized stochastic gradient descent with recursive momentum and the lower-level variable by the stochastic Nesterov accelerated gradient descent algorithm with averaging. We prove that our algorithm achieves an oracle complexity of $\widetilde{O}(1/\epsilon^3)$ to find an $\epsilon$-stationary point. Our proof relies on a novel lemma characterizing the dynamics of stochastic Nesterov accelerated gradient descent algorithm under distribution drift with high probability for the lower-level variable, which is of independent interest and also plays a crucial role in analyzing the hypergradient estimation error over time. Experimental results on various tasks confirm that our proposed algorithm achieves the predicted theoretical acceleration and significantly outperforms baselines in bilevel optimization.
-
-
-To run data hyper-cleaning on SNLI experiments, You could download the original data from [SNLI Corpus](https://nlp.stanford.edu/projects/snli/), or directly download the **preprocessed version** from [link](https://sendgb.com/zAjLJpQVWca).
-
-Create 'data' directory in the current path by `mkdir data` and put all the data files in `data/` directory
+Create 'data' directory in the current path by `mkdir data` and put all the data files in `data/` directory.
 
 ### Run bilevel [algorithm] on data hyper-cleaning:
 ```
     python main.py --methods [algorithm] 
 ```
-where the argument 'algorithm'  can  be choosen from [accbo, bo-rep, saba, ma-soba, stocbio, sustain, ttsa, vrbo]
+where the argument 'algorithm'  can  be choosen from [accbo, bo-rep, saba, ma-soba, stocbio, sustain, ttsa, vrbo].
