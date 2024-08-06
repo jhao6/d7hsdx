@@ -50,10 +50,8 @@ class Learner(nn.Module):
                                        self.inner_model.parameters()]
         self.outer_optimizer = SGD([self.lambda_x], lr=self.outer_update_lr)
         self.inner_optimizer = SGD(self.inner_model.parameters(), lr=self.inner_update_lr)
-        self.inner_stepLR = torch.optim.lr_scheduler.StepLR(self.inner_optimizer, step_size=args.epoch, gamma=0.8)
-        self.outer_stepLR = torch.optim.lr_scheduler.StepLR(self.outer_optimizer, step_size=args.epoch, gamma=0.8)
         self.inner_model.train()
-        self.gamma = args.gamma
+        self.beta = args.beta
         self.criterion = nn.CrossEntropyLoss(reduction='none').to(self.device)
 
     def forward(self, train_loader, val_loader, training = True, epoch = 0):
@@ -90,7 +88,7 @@ class Learner(nn.Module):
                 grad_x_on_old_model = self.stocbio_old(self.args, outer_loss_old, train_batch1, train_batch2)[0]
 
                 temp_hmx = self.hypermomentum_x.detach()
-                self.hypermomentum_x = grad_x.detach() + (1 - self.gamma) * (self.hypermomentum_x_old.detach() - grad_x_on_old_model.detach())
+                self.hypermomentum_x = grad_x.detach() + (1 - self.beta) * (self.hypermomentum_x_old.detach() - grad_x_on_old_model.detach())
                 self.hypermomentum_x_old.data =  temp_hmx
 
                 input, label_id, data_indx = next(iter(train_loader))
@@ -106,7 +104,7 @@ class Learner(nn.Module):
                 grad_y_on_old_model = torch.autograd.grad(loss, self.inner_model_old.parameters())
                 for i, (gy, gyo) in enumerate(zip(grad_y, grad_y_on_old_model)):
                     temp_hmy = self.hypermomentum_y[i].detach()
-                    self.hypermomentum_y[i] =  gy.detach() + (1 - self.gamma) * (self.hypermomentum_y_old[i].detach() - gyo.detach())
+                    self.hypermomentum_y[i] =  gy.detach() + (1 - self.beta) * (self.hypermomentum_y_old[i].detach() - gyo.detach())
                     self.hypermomentum_y_old[i].data = temp_hmy
 
                 self.lambda_x_old = copy.deepcopy(self.lambda_x)

@@ -34,7 +34,6 @@ class Learner(nn.Module):
                 pool_type=args.pool_type,
                 linear_fc=args.linear_fc
             )
-            # self.inner_model_hat = copy.deepcopy(self.inner_model)
             self.y = self.inner_model.parameters()
             self.y_old = self.inner_model.parameters()
             self.y_hat = self.inner_model.parameters()
@@ -56,7 +55,7 @@ class Learner(nn.Module):
 
         for step, data in enumerate(train_loader):
             self.inner_model.to(self.device)
-            # if update the lower-level variables
+            # Option 2: check if update the lower-level variables
             if step % self.args.update_interval == 0:
                 for yo, y in zip(self.y_old, self.y):
                     yo.data = y.data.clone()

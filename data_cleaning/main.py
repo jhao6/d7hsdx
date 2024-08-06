@@ -28,7 +28,7 @@ def main():
 
     parser.add_argument("--data_path", default='../data/dataset.json', type=str,
                         help="Path to dataset file")
-    
+
     parser.add_argument("--batch_size", default=128, type=int,
                         help="batch_size", )
 
@@ -63,7 +63,7 @@ def main():
                         help="Number of interation in the inner loop during train time")
 
     parser.add_argument("--gamma", default=1e-3, type=float,
-                        help="clipping threshold")
+                        help="nesterov momentum")
 
     parser.add_argument("--seed", default=2, type=int,
                         help="random seed")
@@ -169,7 +169,7 @@ def main():
     elif args.methods == 'sustain':
         args.outer_update_lr = 5e-2
         args.inner_update_lr = 5e-2
-        args.gamma = 0.9
+        args.beta = 0.9
         learner = sustain.Learner(args, training_size)
 
     elif args.methods == 'vrbo':
