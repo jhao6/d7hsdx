@@ -20,32 +20,11 @@ class Learner(nn.Module):
         """
         super(Learner, self).__init__()
         self.args = args
-        self.num_labels = args.num_labels
-        self.xi = args.xi
-        self.data=args.data
-        self.outer_batch_size = args.outer_batch_size
-        self.inner_batch_size = args.inner_batch_size
         self.outer_update_lr = args.outer_update_lr
-        self.old_outer_update_lr = args.outer_update_lr
         self.inner_update_lr = args.inner_update_lr
-        self.inner_update_step = args.inner_update_step
-        self.inner_update_step_eval = args.inner_update_step_eval
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.collate_pad_ = self.collate_pad if args.data=='news_data' else self.collate_pad_snli
         self.training_size = training_size
-
-        if args.data == 'news_data':
-            self.meta_model = RNN(
-                word_embed_dim=args.word_embed_dim,
-                encoder_dim=args.encoder_dim,
-                n_enc_layers=args.n_enc_layers,
-                dpout_model=0.0,
-                dpout_fc=0.0,
-                fc_dim=args.fc_dim,
-                n_classes=args.n_classes,
-                pool_type=args.pool_type,
-                linear_fc=args.linear_fc
-            )
         if args.data == 'snli':
             self.inner_model = NLIRNN(
                 word_embed_dim=args.word_embed_dim,
@@ -58,7 +37,6 @@ class Learner(nn.Module):
                 pool_type=args.pool_type,
                 linear_fc=args.linear_fc
             )
-
         self.lambda_x =  torch.ones((self.training_size)).to(self.device)
         self.lambda_x.requires_grad=True
         param_count = 0
@@ -69,27 +47,17 @@ class Learner(nn.Module):
         self.hyper_momentum = torch.zeros(self.training_size).to(self.device)
         self.outer_optimizer = SGD([self.lambda_x], lr=self.outer_update_lr)
         self.inner_optimizer = SGD(self.inner_model.parameters(), lr=self.inner_update_lr)
-        self.inner_stepLR = torch.optim.lr_scheduler.StepLR(self.inner_optimizer, step_size=args.epoch, gamma=0.4)
-        self.outer_stepLR = torch.optim.lr_scheduler.StepLR(self.outer_optimizer, step_size=args.epoch, gamma=0.4)
         self.inner_model.train()
-        self.gamma = args.gamma
         self.beta = args.beta
-        self.nu = args.nu
-        self.y_warm_start = args.y_warm_start
-        self.normalized = args.grad_normalized
-        self.grad_clip = args.grad_clip
-        self.no_meta = args.no_meta
         self.criterion = nn.CrossEntropyLoss(reduction='none').to(self.device)
 
     def forward(self, train_loader, val_loader, training=True, epoch=0):
         task_accs = []
         task_loss = []
-        sum_gradients = []
-        num_inner_update_step =  self.inner_update_step
         self.inner_model.to(self.device)
         for step, data in enumerate(train_loader):
             all_loss = []
-            input, label_id, data_indx = next(iter(train_loader))
+            input, label_id, data_indx = data
             outputs = predict(self.inner_model, input)
             inner_loss = torch.mean(torch.sigmoid(self.lambda_x[data_indx])*self.criterion(outputs, label_id.to(self.device))) + 0.0001 * sum(
                 [x.norm().pow(2) for x in self.inner_model.parameters()]).sqrt()
@@ -111,9 +79,6 @@ class Learner(nn.Module):
 
             self.hypergradient(self.args, jacob_flat, q_loss, train_batch)
             self.lambda_x.grad = self.hyper_momentum[0]
-            # grad_l2_norm_sq = torch.sum(self.lambda_x.grad* self.lambda_x.grad)
-            # grad_l2_norm = torch.sqrt(grad_l2_norm_sq).item()
-            # print(f"gradient norm: {grad_l2_norm}")
             self.outer_optimizer.step()
             self.outer_optimizer.zero_grad()
             q_logits = F.softmax(q_outputs, dim=1)
@@ -126,8 +91,6 @@ class Learner(nn.Module):
             task_loss.append(q_loss.detach().cpu())
             torch.cuda.empty_cache()
             print(f'Task loss: {np.mean(task_loss):.4f}, Task acc: {np.mean(task_accs):.4f}')
-        # self.inner_stepLR.step()
-        # self.outer_stepLR.step()
         return np.mean(task_accs),  np.mean(task_loss)
 
     def test(self, test_loader):
@@ -154,9 +117,7 @@ class Learner(nn.Module):
     def hypergradient(self, args, jacob_flat, loss, query_batch):
         val_data, val_labels, data_idx = query_batch
         loss.backward()
-        # Fy_gradient = torch.autograd.grad(loss, adapter_model.parameters(), retain_graph=True)
         Fy_gradient = [g_param.grad.detach().view(-1) for g_param in self.inner_model.parameters()]
-        # Fx_gradient = [g_param.grad.detach() for g_param in self.inner_model.parameters()]
         Fy_gradient_flat = torch.unsqueeze(torch.reshape(torch.hstack(Fy_gradient), [-1]), 1)
         self.z_params -= args.nu * (jacob_flat - Fy_gradient_flat)
         # Gyx_gradient
@@ -235,8 +196,6 @@ class Learner(nn.Module):
 def predict(net, inputs):
     """ Get predictions for a single batch. """
     # snli dataaset
-    # (s1_embed, s2_embed), (s1_lens, s2_lens) = inputs
-    # outputs = net((s1_embed.cuda(), s1_lens), (s2_embed.cuda(), s2_lens))
     (s1_embed, s2_embed), (s1_lens, s2_lens) = inputs
     outputs = net((s1_embed.cuda(), s1_lens), (s2_embed.cuda(), s2_lens))
     return outputs

@@ -21,17 +21,10 @@ class Learner(nn.Module):
         """
         super(Learner, self).__init__()
         self.args = args
-        self.num_labels = args.num_labels
-        self.outer_batch_size = args.outer_batch_size
-        self.inner_batch_size = args.inner_batch_size
         self.outer_update_lr  = args.outer_update_lr
-        self.old_outer_update_lr = args.outer_update_lr
         self.inner_update_lr  = args.inner_update_lr
-        self.inner_update_step = args.inner_update_step
-        self.inner_update_step_eval = args.inner_update_step_eval
         self.training_size = training_size
         self.device =torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
         if args.data == 'snli':
             self.inner_model = NLIRNN(
                 word_embed_dim=args.word_embed_dim,
@@ -45,9 +38,6 @@ class Learner(nn.Module):
                 linear_fc=args.linear_fc
             )
             self.inner_model_old = copy.deepcopy(self.inner_model).cuda()
-            # self.y = self.inner_model.parameters()
-            # self.y_old = self.inner_model_old.parameters()
-            # self.y_hat = self.inner_model.parameters()
         self.lambda_x =  torch.ones((self.training_size)).to(self.device)
         self.lambda_x_old =  torch.ones((self.training_size)).to(self.device)
         self.lambda_x.requires_grad=True
@@ -64,12 +54,9 @@ class Learner(nn.Module):
         self.outer_stepLR = torch.optim.lr_scheduler.StepLR(self.outer_optimizer, step_size=args.epoch, gamma=0.8)
         self.inner_model.train()
         self.gamma = args.gamma
-        self.grad_clip = args.grad_clip
-        self.no_meta = args.no_meta
         self.criterion = nn.CrossEntropyLoss(reduction='none').to(self.device)
 
     def forward(self, train_loader, val_loader, training = True, epoch = 0):
-        # self.model.load_state_dict(torch.load('checkpoints/itd-model.pkl'))
         task_accs = []
         task_loss = []
 
@@ -101,7 +88,7 @@ class Learner(nn.Module):
                 outputs_val_on_old_model = predict(self.inner_model_old, input_val)
                 outer_loss_old = torch.mean(self.criterion(outputs_val_on_old_model, label_id_val.to(self.device)))
                 grad_x_on_old_model = self.stocbio_old(self.args, outer_loss_old, train_batch1, train_batch2)[0]
-                # for i, (gx, gxo) in enumerate(zip(grad_x, grad_x_on_old_model)):
+
                 temp_hmx = self.hypermomentum_x.detach()
                 self.hypermomentum_x = grad_x.detach() + (1 - self.gamma) * (self.hypermomentum_x_old.detach() - grad_x_on_old_model.detach())
                 self.hypermomentum_x_old.data =  temp_hmx
@@ -141,20 +128,17 @@ class Learner(nn.Module):
             task_loss.append(outer_loss.detach().cpu())
             torch.cuda.empty_cache()
             print(f'Task loss: {np.mean(task_loss):.4f}, Task acc: {np.mean(task_accs):.4f}')
-            # self.inner_model_old = copy.deepcopy(self.inner_model)
 
         for param_group in self.outer_optimizer.param_groups:
             param_group['lr'] =  self.args.outer_update_lr * ((1 / (epoch + 2)) ** (1 / 3))
             lr = param_group['lr']
             print(f'Outer LR: {lr}')
-            # self.gamma = self.gamma * (lr ** 2)
-            # print(f' gamma: {self.gamma}')
+
         for param_group in self.inner_optimizer.param_groups:
             param_group['lr'] =  self.args.inner_update_lr * ((1 / (epoch + 2)) ** (1 / 3))
             lr = param_group['lr']
             print(f'Inner LR: {lr}')
-        # self.inner_stepLR.step()
-        # self.outer_stepLR.step()
+
         return np.mean(task_accs), np.mean(task_loss)
 
     def collate_pad_(self, data_points):
@@ -205,9 +189,6 @@ class Learner(nn.Module):
         F_gradient = [g_param.view(-1) for g_param in Fy_gradient]
         v_0 = torch.unsqueeze(torch.reshape(torch.hstack(F_gradient), [-1]), 1).detach()
 
-        # Fx_gradient = [g_param.view(-1) for g_param in Fx_gradient]
-
-        # Hessian
         z_list = []
         outputs = predict(self.inner_model, train_data)
         loss = torch.mean(torch.sigmoid(self.lambda_x[train_indx])*self.criterion(outputs, train_labels.to(self.device))) + 0.0001 * sum(
@@ -216,7 +197,7 @@ class Learner(nn.Module):
         Gy_gradient = torch.autograd.grad(loss, self.inner_model.parameters(), create_graph=True)
 
         for g_grad, param in zip(Gy_gradient, self.inner_model.parameters()):
-            G_gradient.append((param - args.hessian_lr * g_grad).view(-1))
+            G_gradient.append((param - args.neumann_lr * g_grad).view(-1))
         G_gradient = torch.reshape(torch.hstack(G_gradient), [-1])
 
         for _ in range(args.hessian_q):
@@ -226,9 +207,8 @@ class Learner(nn.Module):
             v_0 = torch.unsqueeze(torch.reshape(torch.hstack(v_params), [-1]), 1).detach()
             z_list.append(v_0)
         index = np.random.randint(args.hessian_q)
-        v_Q = args.hessian_lr * z_list[index]
+        v_Q = args.neumann_lr * z_list[index]
 
-        # Gyx_gradient
         outputs = predict(self.inner_model, val_data)
         loss = torch.mean(torch.sigmoid(self.lambda_x[val_indx])*self.criterion(outputs, val_labels.to(self.device))) + 0.0001 * sum(
                 [x.norm().pow(2) for x in self.inner_model.parameters()]).sqrt()
@@ -248,9 +228,6 @@ class Learner(nn.Module):
         F_gradient = [g_param.view(-1) for g_param in Fy_gradient]
         v_0 = torch.unsqueeze(torch.reshape(torch.hstack(F_gradient), [-1]), 1).detach()
 
-        # Fx_gradient = [g_param.view(-1) for g_param in Fx_gradient]
-
-        # Hessian
         z_list = []
         outputs = predict(self.inner_model_old, train_data)
         loss = torch.mean(torch.sigmoid(self.lambda_x_old[train_indx])*self.criterion(outputs, train_labels.to(self.device))) + 0.0001 * sum(
@@ -259,7 +236,7 @@ class Learner(nn.Module):
         Gy_gradient = torch.autograd.grad(loss, self.inner_model_old.parameters(), create_graph=True)
 
         for g_grad, param in zip(Gy_gradient, self.inner_model_old.parameters()):
-            G_gradient.append((param - args.hessian_lr * g_grad).view(-1))
+            G_gradient.append((param - args.neumann_lr * g_grad).view(-1))
         G_gradient = torch.reshape(torch.hstack(G_gradient), [-1])
 
         for _ in range(args.hessian_q):
@@ -270,9 +247,8 @@ class Learner(nn.Module):
             z_list.append(v_0)
             z_list.append(v_0)
         index = np.random.randint(args.hessian_q)
-        v_Q = args.hessian_lr * z_list[index]
+        v_Q = args.neumann_lr * z_list[index]
 
-        # Gyx_gradient
         outputs = predict(self.inner_model_old, val_data)
         loss = torch.mean(torch.sigmoid(self.lambda_x_old[val_indx])*self.criterion(outputs, val_labels.to(self.device))) + 0.0001 * sum(
                 [x.norm().pow(2) for x in self.inner_model_old.parameters()]).sqrt()

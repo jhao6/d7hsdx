@@ -22,44 +22,13 @@ class Learner(nn.Module):
         """
         super(Learner, self).__init__()
         self.args = args
-        self.num_labels = args.num_labels
-        self.xi = args.xi
-        self.data=args.data
-        self.outer_batch_size = args.outer_batch_size
-        self.inner_batch_size = args.inner_batch_size
         self.outer_update_lr = args.outer_update_lr
-        self.old_outer_update_lr = args.outer_update_lr
         self.inner_update_lr = args.inner_update_lr
         self.inner_update_step = args.inner_update_step
-        self.inner_update_step_eval = args.inner_update_step_eval
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.collate_pad_ = self.collate_pad if args.data=='news_data' else self.collate_pad_snli
         self.training_size = training_size
-        self.interval = args.interval
-        if args.data == 'news_data':
-            self.meta_model = RNN(
-                word_embed_dim=args.word_embed_dim,
-                encoder_dim=args.encoder_dim,
-                n_enc_layers=args.n_enc_layers,
-                dpout_model=0.0,
-                dpout_fc=0.0,
-                fc_dim=args.fc_dim,
-                n_classes=args.n_classes,
-                pool_type=args.pool_type,
-                linear_fc=args.linear_fc
-            )
-        if args.data ==  'sentment140':
-            self.inner_model = RNN(
-                word_embed_dim=args.word_embed_dim,
-                encoder_dim=args.encoder_dim,
-                n_enc_layers=args.n_enc_layers,
-                dpout_model=0.0,
-                dpout_fc=0.0,
-                fc_dim=args.fc_dim,
-                n_classes=args.n_classes,
-                pool_type=args.pool_type,
-                linear_fc=args.linear_fc
-            )
+        self.update_interval = args.update_interval
         if args.data == 'snli':
             self.inner_model = NLIRNN(
                 word_embed_dim=args.word_embed_dim,
@@ -82,25 +51,17 @@ class Learner(nn.Module):
         self.hyper_momentum = torch.zeros(self.training_size).to(self.device)
         self.outer_optimizer = SGD([self.lambda_x], lr=self.outer_update_lr)
         self.inner_optimizer = SGD(self.inner_model.parameters(), lr=self.inner_update_lr)
-        self.inner_stepLR = torch.optim.lr_scheduler.StepLR(self.inner_optimizer, step_size=args.epoch, gamma=0.2)
-        self.outer_stepLR = torch.optim.lr_scheduler.StepLR(self.outer_optimizer, step_size=args.epoch, gamma=0.2)
         self.inner_model.train()
-        self.gamma = args.gamma
         self.beta = args.beta
-        self.nu = args.nu
         self.y_warm_start = args.y_warm_start
-        self.normalized = args.grad_normalized
-        self.grad_clip = args.grad_clip
-        self.no_meta = args.no_meta
         self.criterion = nn.CrossEntropyLoss(reduction='none').to(self.device)
 
     def forward(self, train_loader, val_loader, training=True, epoch=0):
         task_accs = []
         task_loss = []
         self.inner_model.to(self.device)
-        # self.y_warm_start = math.ceil(self.y_warm_start/2) if (task_id%5==0 and task_id>0) else self.y_warm_start
         for step, data in enumerate(train_loader):
-            num_inner_update_step = self.y_warm_start if step%self.interval==0  else self.inner_update_step
+            num_inner_update_step = self.y_warm_start if step%self.update_interval==0  else self.inner_update_step
             all_loss = []
 
             input, label_id, data_indx = next(iter(train_loader))
@@ -114,7 +75,7 @@ class Learner(nn.Module):
             g_grad_flat = torch.unsqueeze(torch.reshape(torch.hstack(g_grad), [-1]), 1)
 
             jacob = torch.autograd.grad(g_grad_flat, self.inner_model.parameters(), grad_outputs=self.z_params)
-            if step%self.interval == 0:
+            if step%self.update_interval == 0:
                 self.inner_optimizer.step()
                 for i in range(0, num_inner_update_step):
                     input, label_id, data_indx = next(iter(train_loader))
@@ -123,8 +84,7 @@ class Learner(nn.Module):
                         [x.norm().pow(2) for x in self.inner_model.parameters()]).sqrt()
                     inner_loss.backward()
                     self.inner_optimizer.step()
-                    # print(f'inner loss: {inner_loss}')
-                # self.outer_optimizer.zero_grad()
+
             self.inner_optimizer.zero_grad()
             jacob = [j_param.detach().view(-1) for j_param in jacob]
             jacob_flat = torch.unsqueeze(torch.reshape(torch.hstack(jacob), [-1]), 1)
@@ -135,20 +95,14 @@ class Learner(nn.Module):
             self.hypergradient(self.args, jacob_flat, q_loss, train_batch)
             self.lambda_x.grad = self.hyper_momentum[0]
             grad_l2_norm_sq = 0.0
-            # for i, gradient in enumerate(self.hyper_momentum):
-            #     if gradient is None:
-            #         continue
+
             grad_l2_norm_sq += torch.sum(self.lambda_x.grad* self.lambda_x.grad)
             grad_l2_norm = torch.sqrt(grad_l2_norm_sq).item()
             momentum_coeff = 1.0 / (1e-10 + grad_l2_norm)
             old_out_lr = copy.copy(self.outer_optimizer.param_groups[0]['lr'])
-            if self.normalized:
-                # print('---------- grad normalized --------')
-                self.outer_optimizer.param_groups[0][ 'lr'] = old_out_lr * momentum_coeff  # best: 0.08
-                # print(f"learning rate: { self.outer_optimizer.param_groups[0][ 'lr']}")
+            self.outer_optimizer.param_groups[0][ 'lr'] = old_out_lr * momentum_coeff
             self.outer_optimizer.step()
             self.outer_optimizer.zero_grad()
-            # if self.normalized:
             self.outer_optimizer.param_groups[0][ 'lr'] = old_out_lr
             q_logits = F.softmax(q_outputs, dim=1)
             pre_label_id = torch.argmax(q_logits, dim=1)
@@ -160,8 +114,7 @@ class Learner(nn.Module):
             task_loss.append(q_loss.detach().cpu())
             torch.cuda.empty_cache()
             print(f'Task loss: {np.mean(task_loss):.4f}, Task acc: {np.mean(task_accs):.4f}')
-        # self.inner_stepLR.step()
-        # self.outer_stepLR.step()
+
         return np.mean(task_accs),  np.mean(task_loss)
 
     def test(self, test_loader):
@@ -189,13 +142,9 @@ class Learner(nn.Module):
         val_data, val_labels, data_idx = query_batch
         loss.backward()
 
-        # Fy_gradient = torch.autograd.grad(loss, adapter_model.parameters(), retain_graph=True)
         Fy_gradient = [g_param.grad.detach().view(-1) for g_param in self.inner_model.parameters()]
         Fy_gradient_flat = torch.unsqueeze(torch.reshape(torch.hstack(Fy_gradient), [-1]), 1)
         self.z_params -= args.nu * (jacob_flat - Fy_gradient_flat)
-        # Fx_gradient = torch.autograd.grad(loss, self.lambda_x)
-
-        # Gyx_gradient
         output = predict(self.inner_model, val_data)
         loss = torch.mean(
             torch.sigmoid(self.lambda_x[data_idx]) * F.cross_entropy(output, val_labels.cuda(), reduction='none')) + 0.0001 * sum(
@@ -207,7 +156,6 @@ class Learner(nn.Module):
         self.hyper_momentum = [args.beta * h + (1 - args.beta) *  Gyxz for (h, Gyxz) in
                           zip(self.hyper_momentum,  Gyxz_gradient)]
 
-        # def test():
 
     def collate_pad(self, data_points):
         """ Pad data points with zeros to fit length of longest data point in batch. """
@@ -232,13 +180,10 @@ class Learner(nn.Module):
     def collate_pad_snli(self, data_points):
         """ Pad data points with zeros to fit length of longest data point in batch. """
         s_embeds = data_points[0] if type(data_points[0]) == list or type(data_points[0]) == tuple else data_points[1]
-        # s_embeds = data_points[0]
-        # s2_embeds = data_points[0] if type(data_points[0]) == list or type(data_points[0]) == tuple else data_points[1]
         targets = data_points[1] if type(data_points[0]) == list or type(data_points[0]) == tuple else data_points[0]
         # targets = data_points[1]
         s1_embeds = [x for x in s_embeds[0]]
         s2_embeds = [x for x in s_embeds[1]]
-        # targets = [x[1] for x in data_points]
 
         # Get sentences for batch and their lengths.
         s1_lens = np.array([sent.shape[0] for sent in s1_embeds])
@@ -271,11 +216,9 @@ class Learner(nn.Module):
 
 def predict(net, inputs):
     """ Get predictions for a single batch. """
-    # snli dataaset
+    # snli dataset
     (s1_embed, s2_embed), (s1_lens, s2_lens) = inputs
     outputs = net((s1_embed.cuda(), s1_lens), (s2_embed.cuda(), s2_lens))
-    # s_embed, s_lens = inputs
-    # outputs = net((s_embed.cuda(), s_lens))
     return outputs
 
 

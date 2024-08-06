@@ -1,6 +1,3 @@
-import json
-from random import shuffle
-from collections import Counter
 import torch
 import time
 import logging
@@ -8,10 +5,7 @@ import argparse
 import os
 logger = logging.getLogger()
 logger.setLevel(logging.CRITICAL)
-# os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-# from reptile import Learner
-from methods import aid, saba, ma_soba, ttsa, bo_rep, accbo, sustain, vrbo
+from methods import stocbio, saba, ma_soba, ttsa, bo_rep, accbo, sustain, vrbo
 from data_loader import SNLIDataset, Sent140Dataset,  collate_pad, collate_pad_double
 from torch.utils.data import DataLoader
 import random
@@ -32,44 +26,28 @@ def main():
     parser.add_argument("--data", default='snli', type=str,
                         help="dataset: [news_data, snli, sentment140]", )
 
-    parser.add_argument("--data_path", default='../data/news-data/dataset.json', type=str,
+    parser.add_argument("--data_path", default='../data/dataset.json', type=str,
                         help="Path to dataset file")
-
+    
     parser.add_argument("--batch_size", default=128, type=int,
                         help="batch_size", )
 
-    # parser.add_argument("--data_path", default='data/news-data/dataset.json', type=str,
-    #                     help="Path to dataset file")
-
-    parser.add_argument("--save_direct", default='snli', type=str,
+    parser.add_argument("--save_direct", default='./logs', type=str,
                         help="Path to save file")
 
-    parser.add_argument("--word2vec", default="data/news-data/wordvec.pkl", type=str,
+    parser.add_argument("--word2vec", default="data/wordvec.pkl", type=str,
                         help="Path to word2vec file")
 
-    parser.add_argument("--methods" , default='saba', type=str,
-                        help="choise method [aid, ttsa, saba, ma-soba, sustain, vrbo, bo-rep, accbo]")
-
-    parser.add_argument("--num_labels", default=2, type=int,
-                        help="Number of class for classification")
+    parser.add_argument("--methods" , default='stocbio', type=str,
+                        help="choise method [stocbio, ttsa, saba, ma-soba, sustain, vrbo, bo-rep, accbo]")
 
     parser.add_argument("--epoch", default=20, type=int,
-                        help="Number of outer interation")
-    
-    parser.add_argument("--k_spt", default=20, type=int,
-                        help="Number of support samples per task")
-    
-    parser.add_argument("--k_qry", default=20, type=int,
-                        help="Number of query samples per task")
-
-    parser.add_argument("--outer_batch_size", default=20, type=int,
-                        help="Batch of task size")
+                        help="Number of outer iteration")
     
     parser.add_argument("--inner_batch_size", default=128, type=int,
                         help="Training batch size in inner iteration")
 
-
-    parser.add_argument("--hessian_lr", default=1e-2, type=float,
+    parser.add_argument("--neumann_lr", default=1e-2, type=float,
                         help="update for hessian")
 
     parser.add_argument("--hessian_q", default=3, type=int,
@@ -84,54 +62,23 @@ def main():
     parser.add_argument("--inner_update_step", default=1, type=int,
                         help="Number of interation in the inner loop during train time")
 
-    parser.add_argument("--outer_update_step", default=1, type=int,
-                        help="Number of interation in the outer loop during train time")
-
-    parser.add_argument("--inner_update_step_eval", default=40, type=int,
-                        help="Number of interation in the inner loop during test time")
-    
-    parser.add_argument("--num_task_train", default=400, type=int,
-                        help="Total number of meta tasks for training")
-    
-    parser.add_argument("--num_task_test", default=50, type=int,
-                        help="Total number of tasks for testing")
-
-    parser.add_argument("--grad_clip", default=False, type=bool,
-                        help="whether grad clipping or not")
-
-    parser.add_argument("--grad_normalized", default=True, type=bool,
-                        help="whether grad normalized or not")
-
     parser.add_argument("--gamma", default=1e-3, type=float,
                         help="clipping threshold")
-
-    parser.add_argument("--no_meta", default=False, type=bool,
-                        help="whether use meta learning")
 
     parser.add_argument("--seed", default=2, type=int,
                         help="random seed")
 
-    # single loops parameters
     parser.add_argument("--beta", default=0.90, type=float,
                         help="momentum parameters")
 
     parser.add_argument("--nu", default=1e-2, type=float,
                         help="learning rate of z")
 
-    parser.add_argument("--xi", default=0.08, type=float,
-                        help="step-size ratio")
-
     parser.add_argument("--y_warm_start", default=3, type=int,
                         help="update steps for y")
 
     parser.add_argument("--spider_loops", default=3, type=int,
                         help="the spider loops for vrbo")
-
-    parser.add_argument("--interval", default=2, type=int,
-                        help="update interval for y")
-
-    parser.add_argument("--lamb", default=1e-1, type=float,
-                        help="lagerange coefficient")
 
     # RNN hyperparameter settings
     parser.add_argument("--word_embed_dim", default=300, type=int,
@@ -179,130 +126,79 @@ def main():
         args.n_labels = 3
         args.n_classes = 3
 
-    elif args.data == 'sentment140':
-        train = Sent140Dataset("../data", "train", noise_rate=args.noise_rate)
-        test = Sent140Dataset("../data", "test")
-        args.n_labels = 2
-        args.n_classes = 2
-        training_size = train.__len__()
     else:
         print('Do not support this data')
-
     st = time.time()
 
-    if args.data == 'news_data':
-        args.n_classes=2
-        args.n_labels=2
-
-
-    if args.methods == 'aid':
+    if args.methods == 'stocbio':
         args.outer_update_lr = 1e-2
-        args.inner_update_lr = 1e-2
-        args.hessian_lr = 1e-2
-        args.grad_clip = False
-        # args.gamma = 1.0
+        args.inner_update_lr = 2e-3
         args.inner_update_step = 3
-        learner = aid.Learner(args, training_size)
+        learner = stocbio.Learner(args, training_size)
 
-    if args.methods == 'ttsa':
+    elif args.methods == 'ttsa':
         args.outer_update_lr = 1e-3
         args.inner_update_lr = 1e-2
-        args.hessian_lr = 1e-2
-        args.grad_clip = False
-        args.inner_update_step = 2
+        args.inner_update_step = 1
         learner = ttsa.Learner(args, training_size)
 
 
     elif args.methods == "saba":
         args.outer_update_lr = 5e-2
         args.inner_update_lr =2e-2
-        args.grad_normalized = False
-        args.grad_clip = False
-        args.beta = 0.0
         args.nu = 1e-2
-        args.inner_update_step = 1
         learner = saba.Learner(args, training_size)
 
     elif args.methods == 'ma-soba':
         args.outer_update_lr = 1e-2
-        args.inner_update_lr =1e-2
-        args.grad_normalized = False
-        args.grad_clip = False
+        args.inner_update_lr = 1e-2
         args.beta = 0.9
         args.nu = 1e-2
-        args.inner_update_step = 1
         learner = ma_soba.Learner(args, training_size)
 
 
     elif args.methods == 'bo-rep':
-        args.outer_update_lr = 1e-2
-        args.inner_update_lr =1e-2
-        args.grad_normalized =  True
-        args.grad_clip = False
-        args.xi = 1
+        args.outer_update_lr = 2e-2
+        args.inner_update_lr = 1e-2
         args.beta = 0.9
         args.nu = 1e-2
         args.inner_update_step = 1
+        args.update_interval = 2
         learner = bo_rep.Learner(args, training_size)
 
     elif args.methods == 'sustain':
         args.outer_update_lr = 5e-2
         args.inner_update_lr = 5e-2
-        args.grad_normalized =  True
-        args.grad_clip = False
         args.gamma = 0.9
         learner = sustain.Learner(args, training_size)
 
     elif args.methods == 'vrbo':
         args.outer_update_lr = 1e-1
         args.inner_update_lr = 5e-2
-        args.grad_normalized =  True
-        args.grad_clip = False
         args.spider_loops = 2
         args.update_interval = 2
-        args.inner_batch_size = 512
+        args.inner_batch_size = 256
         learner = vrbo.Learner(args, training_size)
 
 
     elif args.methods == 'accbo':
         args.outer_update_lr = 1e-1
-        args.inner_update_lr = 5e-2
-        if args.noise_rate == 0.4:
-            args.inner_update_lr = 5e-2
-            args.outer_update_lr=1e-4
-        args.grad_normalized =  True
-        args.grad_clip = False
-        args.xi = 1
+        args.inner_update_lr = 1e-1
         args.beta = 0.9
-        args.nu = 1e-2
         args.gamma = 0.1
         args.tau = 0.5
-        args.interval = 2
+        args.update_interval = 2
         args.inner_update_step = 3
         learner = accbo.Learner(args, training_size)
 
-    # elif args.methods == 'accbo':
-    #     args.inner_update_lr =5e-2
-    #     args.outer_update_lr = 5e-2
-    #     args.grad_normalized =  True
-    #     args.grad_clip = False
-    #     args.y_warm_start = 10
-    #     args.beta = 0.9
-    #     args.nu = 1e-2
-    #     args.inner_update_step = 1
-    #     args.inner_batch_size = args.num_task_test
-    #     learner = accbo.Learner(args, training_size)
     else:
         print('No such method, please change the method name!')
-
 
     global_step = 0
     acc_all_test = []
     acc_loss_test = []
     acc_all_train = []
     acc_loss_train = []
-    # train_loader = DataLoader(train, shuffle=True,  batch_size=args.batch_size, collate_fn=collate_pad)
-    # test_loader = DataLoader(test, batch_size=args.batch_size, collate_fn=collate_pad)
     for epoch in range(args.epoch):
         print(f"[epoch/epochs]:{epoch}/{args.epoch}")
         train_loader = DataLoader(train, shuffle=True, batch_size=args.inner_batch_size, collate_fn=collate_pad_double)
@@ -326,11 +222,9 @@ def main():
 
     date = time.strftime('%Y-%m-%d-%H-%M',time.localtime(time.time()))
     file_name = f'{args.methods}_outlr{args.outer_update_lr}_inlr{args.inner_update_lr}_seed{args.seed}_{date}'
-    # acc_file_name = f'meta_learning_{args.methods}_{date}'
     if not os.path.exists('logs/'+args.save_direct):
         os.mkdir('logs/'+args.save_direct)
     save_path = 'logs/'+args.save_direct
-    # save_path = os.path.join(save_path, 'turning_gamma')
     total_time = (time.time() - st) / 3600
     files = open(os.path.join(save_path, file_name)+'.txt', 'w')
     files.write(str({'Exp configuration': str(args), 'AVG Train ACC': str(acc_all_train),

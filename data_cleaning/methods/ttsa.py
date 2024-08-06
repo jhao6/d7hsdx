@@ -22,14 +22,9 @@ class Learner(nn.Module):
         """
         super(Learner, self).__init__()
         self.args = args
-        self.num_labels = args.num_labels
-        self.outer_batch_size = args.outer_batch_size
-        self.inner_batch_size = args.inner_batch_size
         self.outer_update_lr = args.outer_update_lr
-        self.old_outer_update_lr = args.outer_update_lr
         self.inner_update_lr = args.inner_update_lr
         self.inner_update_step = args.inner_update_step
-        self.inner_update_step_eval = args.inner_update_step_eval
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.training_size = training_size
         if args.data == 'snli':
@@ -48,13 +43,10 @@ class Learner(nn.Module):
         self.lambda_x.requires_grad=True
         self.outer_optimizer = SGD([self.lambda_x], lr=self.outer_update_lr)
         self.inner_optimizer = SGD(self.inner_model.parameters(), lr=self.inner_update_lr)
-        self.inner_stepLR = torch.optim.lr_scheduler.StepLR(self.inner_optimizer, step_size=args.epoch, gamma=0.8)
-        self.outer_stepLR = torch.optim.lr_scheduler.StepLR(self.outer_optimizer, step_size=args.epoch, gamma=0.8)
         self.inner_model.train()
         self.criterion = nn.CrossEntropyLoss(reduction='none').to(self.device)
 
     def forward(self, train_loader, val_loader,  training=True, epoch=0):
-        # self.model.load_state_dict(torch.load('checkpoints/itd-model.pkl'))
         task_accs = []
         task_loss = []
 
@@ -76,7 +68,6 @@ class Learner(nn.Module):
             q_loss = torch.mean(self.criterion(q_outputs, q_label_id.to(self.device)))
 
             hypergradient = self.stocbio(self.args, q_loss, next(iter(train_loader)), next(iter(train_loader)))
-            # print(f'Task loss: {np.mean(all_loss):.4f}')
             self.lambda_x.grad = hypergradient[0]
             self.outer_optimizer.step()
             self.outer_optimizer.zero_grad()
@@ -92,9 +83,6 @@ class Learner(nn.Module):
             task_loss.append(q_loss.detach().cpu())
             torch.cuda.empty_cache()
             print(f'Task loss: {np.mean(task_loss):.4f}, Task acc: {np.mean(task_accs):.4f}')
-
-        # self.inner_stepLR.step()
-        # self.outer_stepLR.step()
 
         return np.mean(task_accs), np.mean(task_loss)
 
@@ -153,7 +141,7 @@ class Learner(nn.Module):
         Gy_gradient = torch.autograd.grad(loss, self.inner_model.parameters(), create_graph=True)
 
         for g_grad, param in zip(Gy_gradient, self.inner_model.parameters()):
-            G_gradient.append((param - args.hessian_lr * g_grad).view(-1))
+            G_gradient.append((param - args.neumann_lr * g_grad).view(-1))
         G_gradient = torch.reshape(torch.hstack(G_gradient), [-1])
         z_list = []
         for _ in range(args.hessian_q):
@@ -163,9 +151,8 @@ class Learner(nn.Module):
             v_0 = torch.unsqueeze(torch.reshape(torch.hstack(v_params), [-1]), 1).detach()
             z_list.append(v_0)
         index = np.random.randint(args.hessian_q)
-        v_Q = args.hessian_lr * z_list[index]
+        v_Q = args.neumann_lr * z_list[index]
 
-        # Gyx_gradient
         outputs = predict(self.inner_model, val_data)
         loss = torch.mean(torch.sigmoid(self.lambda_x[val_indx]) * self.criterion(outputs, val_labels.to(
             self.device))) + 0.0001 * sum(
