@@ -224,6 +224,7 @@ def main():
     if not os.path.exists('logs/'):
         os.mkdir('logs/')
     save_path = 'logs/'
+    
     total_time = (time.time() - st) / 3600
     files = open(os.path.join(save_path, file_name)+'.txt', 'w')
     files.write(str({'Exp configuration': str(args), 'AVG Train ACC': str(acc_all_train),
