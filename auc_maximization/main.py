@@ -196,7 +196,6 @@ def main():
     if args.methods == 'ttsa':
         args.outer_update_lr = 5e-3
         args.inner_update_lr = 1e-2
-        args.inner_update_step = 1
         args.neumann_lr = 1e-1
         args.hessian_q= 3
         learner = ttsa.Learner(args)

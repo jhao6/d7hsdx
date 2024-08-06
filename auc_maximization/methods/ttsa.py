@@ -21,7 +21,6 @@ class Learner(nn.Module):
         self.args = args
         self.outer_update_lr = args.outer_update_lr
         self.inner_update_lr = args.inner_update_lr
-        self.inner_update_step = args.inner_update_step
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.inner_model = RNN(
             word_embed_dim=args.word_embed_dim,
@@ -53,11 +52,10 @@ class Learner(nn.Module):
             all_loss = []
 
             input, label_id, data_indx = data
-            for i in range(self.args.inner_update_step):
-                outputs = predict(self.inner_model, input)
-                loss = -self.aucloss(outputs, label_id.to(self.device))
-                loss.backward()
-                self.inner_optimizer.step()
+            outputs = predict(self.inner_model, input)
+            loss = -self.aucloss(outputs, label_id.to(self.device))
+            loss.backward()
+            self.inner_optimizer.step()
             all_loss.append(loss.item())
 
             q_input, q_label_id, q_indx = next(iter(val_loader))
